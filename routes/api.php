@@ -39,6 +39,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/profile', [CandidateProfileController::class, 'show']);
     Route::put('/profile', [CandidateProfileController::class, 'update']);
 
+    // Throttled separately — each request calls a paid external API, so an
+    // already-compromised candidate session shouldn't be able to hammer it
+    // for free the way it could an ordinary CRUD route.
+    Route::middleware('throttle:10,1')->post('/profile/resume-upload', [CandidateProfileController::class, 'uploadResume']);
+
     Route::get('/applications', [ApplicationController::class, 'index']);
     Route::get('/applications/{application}', [ApplicationController::class, 'show']);
     Route::patch('/applications/{application}/status', [ApplicationController::class, 'updateStatus']);

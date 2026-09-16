@@ -5,11 +5,13 @@ namespace App\Observers;
 use App\Models\Application;
 use App\Models\JobPosting;
 use App\Services\MatchScoreService;
+use App\Services\SemanticMatchService;
 
 class JobPostingObserver
 {
     public function __construct(
         private readonly MatchScoreService $matchScoreService,
+        private readonly SemanticMatchService $semanticMatchService,
     ) {}
 
     public function updated(JobPosting $job): void
@@ -25,6 +27,7 @@ class JobPostingObserver
                 }
 
                 $application->match_score = $this->matchScoreService->score($profile, $job);
+                $application->semantic_match_score = $this->semanticMatchService->score($profile, $job);
                 $application->saveQuietly();
             });
     }

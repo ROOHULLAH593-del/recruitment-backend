@@ -24,6 +24,7 @@ class ApplicationResource extends JsonResource
                 $this->status->allowedManualTransitions(),
             ),
             'match_score' => $this->match_score,
+            'semantic_match_score' => $this->semantic_match_score,
             'interview' => new InterviewResource($this->whenLoaded('interview')),
             'applied_at' => $this->applied_at,
             'updated_at' => $this->updated_at,

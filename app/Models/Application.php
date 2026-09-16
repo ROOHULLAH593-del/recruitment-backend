@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
     'candidate_id',
     'status',
     'match_score',
+    'semantic_match_score',
     'applied_at',
 ])]
 class Application extends Model
@@ -30,6 +31,7 @@ class Application extends Model
         return [
             'status' => ApplicationStatus::class,
             'match_score' => 'decimal:2',
+            'semantic_match_score' => 'decimal:2',
             'applied_at' => 'datetime',
         ];
     }

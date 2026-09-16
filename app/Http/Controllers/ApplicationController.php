@@ -52,7 +52,7 @@ class ApplicationController extends Controller
     public function index(Request $request): AnonymousResourceCollection
     {
         $query = Application::query()
-            ->with(['job', 'candidate', 'interview'])
+            ->with(['job', 'candidate.candidateProfile', 'interview'])
             ->orderByDesc('applied_at')
             ->orderByDesc('id');
 
@@ -70,7 +70,7 @@ class ApplicationController extends Controller
     {
         $this->authorize('view', $application);
 
-        return new ApplicationResource($application->load(['job', 'candidate', 'interview']));
+        return new ApplicationResource($application->load(['job', 'candidate.candidateProfile', 'interview']));
     }
 
     /**
@@ -100,6 +100,6 @@ class ApplicationController extends Controller
             }
         }
 
-        return new ApplicationResource($application->load(['job', 'candidate', 'interview']));
+        return new ApplicationResource($application->load(['job', 'candidate.candidateProfile', 'interview']));
     }
 }

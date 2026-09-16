@@ -157,6 +157,54 @@ class ApplicationTest extends TestCase
             ->assertOk();
     }
 
+    public function test_hr_viewing_an_application_sees_the_candidates_full_profile(): void
+    {
+        $hr = User::factory()->hr()->create();
+        $candidate = User::factory()->create();
+        CandidateProfile::factory()->create([
+            'user_id' => $candidate->id,
+            'skills' => ['PHP', 'Laravel'],
+            'education_level' => EducationLevel::Masters,
+            'years_experience' => 6,
+            'resume_text' => 'A seasoned backend engineer.',
+        ]);
+        $application = Application::factory()->create(['candidate_id' => $candidate->id]);
+
+        $this->actingAs($hr, 'sanctum')
+            ->getJson("/api/applications/{$application->id}")
+            ->assertOk()
+            ->assertJsonPath('data.candidate.candidate_profile.skills', ['PHP', 'Laravel'])
+            ->assertJsonPath('data.candidate.candidate_profile.education_level', 'masters')
+            ->assertJsonPath('data.candidate.candidate_profile.years_experience', 6)
+            ->assertJsonPath('data.candidate.candidate_profile.resume_text', 'A seasoned backend engineer.');
+    }
+
+    public function test_candidate_index_includes_the_candidates_profile_for_hr(): void
+    {
+        $hr = User::factory()->hr()->create();
+        $candidate = User::factory()->create();
+        CandidateProfile::factory()->create(['user_id' => $candidate->id, 'skills' => ['Sales']]);
+        Application::factory()->create(['candidate_id' => $candidate->id]);
+
+        $this->actingAs($hr, 'sanctum')
+            ->getJson('/api/applications')
+            ->assertOk()
+            ->assertJsonPath('data.0.candidate.candidate_profile.skills', ['Sales']);
+    }
+
+    public function test_a_candidate_without_access_never_receives_another_candidates_profile_data(): void
+    {
+        $candidate = User::factory()->create();
+        $other = User::factory()->create();
+        CandidateProfile::factory()->create(['user_id' => $other->id, 'skills' => ['Secret Skill']]);
+        $application = Application::factory()->create(['candidate_id' => $other->id]);
+
+        $response = $this->actingAs($candidate, 'sanctum')->getJson("/api/applications/{$application->id}");
+
+        $response->assertStatus(403);
+        $this->assertStringNotContainsString('Secret Skill', $response->getContent());
+    }
+
     public function test_candidate_index_only_returns_their_own_applications(): void
     {
         $candidate = User::factory()->create();

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\EducationLevel;
 use App\Models\Application;
 use App\Models\CandidateProfile;
+use App\Models\Interview;
 use App\Models\JobPosting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -215,6 +216,22 @@ class ApplicationTest extends TestCase
 
         $response->assertOk();
         $this->assertCount(2, $response->json('data'));
+    }
+
+    public function test_candidate_index_includes_their_scheduled_interview(): void
+    {
+        $candidate = User::factory()->create();
+        $application = Application::factory()->create(['candidate_id' => $candidate->id]);
+        $interview = Interview::factory()->create([
+            'application_id' => $application->id,
+            'scheduled_at' => '2026-10-01 14:30:00',
+        ]);
+
+        $response = $this->actingAs($candidate, 'sanctum')->getJson('/api/applications');
+
+        $response->assertOk()
+            ->assertJsonPath('data.0.interview.id', $interview->id)
+            ->assertJsonPath('data.0.interview.scheduled_at', '2026-10-01T14:30:00.000000Z');
     }
 
     public function test_hr_index_returns_all_applications(): void

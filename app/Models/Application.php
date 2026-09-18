@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
     'status',
     'match_score',
     'semantic_match_score',
+    'rejection_reason',
     'applied_at',
 ])]
 class Application extends Model

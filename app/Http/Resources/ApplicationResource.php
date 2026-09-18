@@ -25,6 +25,7 @@ class ApplicationResource extends JsonResource
             ),
             'match_score' => $this->match_score,
             'semantic_match_score' => $this->semantic_match_score,
+            'rejection_reason' => $this->rejection_reason,
             'interview' => new InterviewResource($this->whenLoaded('interview')),
             'applied_at' => $this->applied_at,
             'updated_at' => $this->updated_at,

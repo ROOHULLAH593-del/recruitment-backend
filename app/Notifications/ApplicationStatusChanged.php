@@ -40,8 +40,13 @@ class ApplicationStatusChanged extends Notification
             $message->line("Your application for the **{$jobTitle}** position is now **{$statusLabel}**.");
         }
 
+        $message->line($this->statusMessage($this->application->status));
+
+        if ($this->application->status === ApplicationStatus::Rejected && filled($this->application->rejection_reason)) {
+            $message->line("**Feedback:** {$this->application->rejection_reason}");
+        }
+
         return $message
-            ->line($this->statusMessage($this->application->status))
             ->action('View Your Application', url("/applications/{$this->application->id}"))
             ->line('Thank you for your interest in joining our team.');
     }

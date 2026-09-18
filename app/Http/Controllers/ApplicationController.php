@@ -90,6 +90,13 @@ class ApplicationController extends Controller
 
         $application->update([
             'status' => $newStatus,
+            // Only meaningful for a rejection — cleared on any other
+            // transition (including a later un-rejection back to
+            // Shortlisted) so a stale reason never lingers on a record
+            // that's no longer actually rejected.
+            'rejection_reason' => $newStatus === ApplicationStatus::Rejected
+                ? $request->validated('rejection_reason')
+                : null,
         ]);
 
         if ($application->wasChanged('status')) {

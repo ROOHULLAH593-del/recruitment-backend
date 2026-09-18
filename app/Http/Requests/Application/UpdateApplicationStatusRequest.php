@@ -26,6 +26,10 @@ class UpdateApplicationStatusRequest extends FormRequest
     {
         return [
             'status' => ['required', Rule::enum(ApplicationStatus::class)],
+            // Only meaningful when status is "rejected" — the controller
+            // ignores it for any other transition, so no extra validation
+            // rule is needed to enforce that here.
+            'rejection_reason' => ['nullable', 'string', 'max:2000'],
         ];
     }
 }

@@ -10,7 +10,7 @@ class LoginTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_user_can_login_with_correct_credentials(): void
+    public function test_user_can_login_with_email(): void
     {
         User::factory()->create([
             'email' => 'jane@example.com',
@@ -18,7 +18,7 @@ class LoginTest extends TestCase
         ]);
 
         $response = $this->postJson('/api/login', [
-            'email' => 'jane@example.com',
+            'identifier' => 'jane@example.com',
             'password' => 'password123',
         ]);
 
@@ -27,7 +27,40 @@ class LoginTest extends TestCase
             ->assertJsonStructure(['user', 'token']);
     }
 
-    public function test_login_fails_with_wrong_password(): void
+    public function test_user_can_login_with_username(): void
+    {
+        User::factory()->create([
+            'username' => 'janecandidate',
+            'password' => 'password123',
+        ]);
+
+        $response = $this->postJson('/api/login', [
+            'identifier' => 'janecandidate',
+            'password' => 'password123',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('user.username', 'janecandidate')
+            ->assertJsonStructure(['user', 'token']);
+    }
+
+    public function test_user_can_login_with_cnic(): void
+    {
+        $user = User::factory()->withCnic('12345-1234567-1')->create([
+            'password' => 'password123',
+        ]);
+
+        $response = $this->postJson('/api/login', [
+            'identifier' => '12345-1234567-1',
+            'password' => 'password123',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('user.id', $user->id)
+            ->assertJsonStructure(['user', 'token']);
+    }
+
+    public function test_login_fails_with_wrong_password_via_email(): void
     {
         User::factory()->create([
             'email' => 'jane@example.com',
@@ -35,40 +68,69 @@ class LoginTest extends TestCase
         ]);
 
         $response = $this->postJson('/api/login', [
-            'email' => 'jane@example.com',
+            'identifier' => 'jane@example.com',
             'password' => 'wrong-password',
         ]);
 
-        $response->assertStatus(422)->assertJsonValidationErrors('email');
+        $response->assertStatus(422)->assertJsonValidationErrors('identifier');
     }
 
-    public function test_login_fails_with_email_that_does_not_exist(): void
+    public function test_login_fails_with_wrong_password_via_username(): void
     {
-        $response = $this->postJson('/api/login', [
-            'email' => 'nobody@example.com',
+        User::factory()->create([
+            'username' => 'janecandidate',
             'password' => 'password123',
         ]);
 
-        $response->assertStatus(422)->assertJsonValidationErrors('email');
-    }
-
-    public function test_login_error_message_does_not_reveal_whether_the_email_exists(): void
-    {
-        User::factory()->create(['email' => 'jane@example.com', 'password' => 'password123']);
-
-        $existingEmailResponse = $this->postJson('/api/login', [
-            'email' => 'jane@example.com',
+        $response = $this->postJson('/api/login', [
+            'identifier' => 'janecandidate',
             'password' => 'wrong-password',
         ]);
 
-        $unknownEmailResponse = $this->postJson('/api/login', [
-            'email' => 'nobody@example.com',
+        $response->assertStatus(422)->assertJsonValidationErrors('identifier');
+    }
+
+    public function test_login_fails_with_wrong_password_via_cnic(): void
+    {
+        User::factory()->withCnic('12345-1234567-1')->create([
+            'password' => 'password123',
+        ]);
+
+        $response = $this->postJson('/api/login', [
+            'identifier' => '12345-1234567-1',
+            'password' => 'wrong-password',
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('identifier');
+    }
+
+    public function test_login_fails_with_an_identifier_that_does_not_exist(): void
+    {
+        $response = $this->postJson('/api/login', [
+            'identifier' => 'nobody@example.com',
+            'password' => 'password123',
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('identifier');
+    }
+
+    public function test_login_error_message_does_not_reveal_whether_the_identifier_exists(): void
+    {
+        User::factory()->create(['email' => 'jane@example.com', 'password' => 'password123']);
+
+        $existingIdentifierResponse = $this->postJson('/api/login', [
+            'identifier' => 'jane@example.com',
+            'password' => 'wrong-password',
+        ]);
+
+        $unknownIdentifierResponse = $this->postJson('/api/login', [
+            'identifier' => 'nobody@example.com',
             'password' => 'wrong-password',
         ]);
 
         $this->assertSame(
-            $existingEmailResponse->json('message'),
-            $unknownEmailResponse->json('message'),
+            $existingIdentifierResponse->json('message'),
+            $unknownIdentifierResponse->json('message'),
         );
     }
 

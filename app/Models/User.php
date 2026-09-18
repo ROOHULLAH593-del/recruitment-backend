@@ -14,8 +14,8 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'password', 'role'])]
-#[Hidden(['password', 'remember_token'])]
+#[Fillable(['name', 'email', 'username', 'cnic', 'cnic_hash', 'password', 'role'])]
+#[Hidden(['password', 'remember_token', 'cnic', 'cnic_hash'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
@@ -32,7 +32,18 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'role' => UserRole::class,
+            'cnic' => 'encrypted',
         ];
+    }
+
+    /**
+     * Keyed, deterministic, one-way hash of a CNIC — used both to populate
+     * `cnic_hash` on write and to look it up on login, so the two call
+     * sites can never drift out of sync with each other.
+     */
+    public static function hashCnic(string $cnic): string
+    {
+        return hash_hmac('sha256', $cnic, config('app.key'));
     }
 
     /**

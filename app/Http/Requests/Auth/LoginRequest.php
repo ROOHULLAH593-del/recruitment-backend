@@ -23,7 +23,11 @@ class LoginRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'email' => ['required', 'string', 'email'],
+            // Deliberately untyped/unvalidated as email|username|CNIC —
+            // AuthController::login checks it against all three, and this
+            // request never leaks which one a given value was even meant
+            // to be.
+            'identifier' => ['required', 'string'],
             'password' => ['required', 'string'],
         ];
     }

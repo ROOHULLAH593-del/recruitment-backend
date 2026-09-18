@@ -84,4 +84,17 @@ class UserFactory extends Factory
             'role' => UserRole::Candidate,
         ]);
     }
+
+    /**
+     * Give the user a CNIC, keeping `cnic` and `cnic_hash` in sync — tests
+     * that set `cnic` directly without also computing a matching hash would
+     * silently break CNIC login lookups.
+     */
+    public function withCnic(string $cnic): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'cnic' => $cnic,
+            'cnic_hash' => User::hashCnic($cnic),
+        ]);
+    }
 }

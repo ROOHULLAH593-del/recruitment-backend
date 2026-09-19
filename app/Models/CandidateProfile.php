@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\CandidateDocumentType;
 use App\Enums\EducationLevel;
 use Database\Factories\CandidateProfileFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -18,6 +19,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'skills',
     'education_level',
     'years_experience',
+    'transcript_path',
+    'cnic_front_path',
+    'cnic_back_path',
+    'fsc_certificate_path',
+    'matric_certificate_path',
 ])]
 class CandidateProfile extends Model
 {
@@ -43,5 +49,21 @@ class CandidateProfile extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * Labels of the required documents (see CandidateDocumentType::isRequiredForApplying())
+     * not yet on file — empty when the profile is complete enough to apply.
+     *
+     * @return array<int, string>
+     */
+    public function missingRequiredDocumentLabels(): array
+    {
+        return collect(CandidateDocumentType::cases())
+            ->filter(fn (CandidateDocumentType $type) => $type->isRequiredForApplying())
+            ->reject(fn (CandidateDocumentType $type) => filled($this->{$type->column()}))
+            ->map(fn (CandidateDocumentType $type) => $type->label())
+            ->values()
+            ->all();
     }
 }

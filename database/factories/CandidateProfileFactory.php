@@ -37,4 +37,20 @@ class CandidateProfileFactory extends Factory
             'years_experience' => fake()->numberBetween(0, 15),
         ];
     }
+
+    /**
+     * Marks the profile as having all three documents required to apply
+     * for a job on file (see CandidateDocumentType::isRequiredForApplying()).
+     * Sets plain path strings rather than real stored files — enough for
+     * tests exercising the apply-time completeness gate, which only checks
+     * these columns are filled.
+     */
+    public function withRequiredDocuments(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'transcript_path' => 'candidate-documents/fake/transcript.pdf',
+            'cnic_front_path' => 'candidate-documents/fake/cnic-front.jpg',
+            'cnic_back_path' => 'candidate-documents/fake/cnic-back.jpg',
+        ]);
+    }
 }

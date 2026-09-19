@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\ApplicationController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\CandidateDocumentController;
 use App\Http\Controllers\CandidateProfileController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\HrInvitationController;
@@ -43,6 +44,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // already-compromised candidate session shouldn't be able to hammer it
     // for free the way it could an ordinary CRUD route.
     Route::middleware('throttle:10,1')->post('/profile/resume-upload', [CandidateProfileController::class, 'uploadResume']);
+    Route::post('/profile/documents', [CandidateProfileController::class, 'uploadDocument']);
+    Route::get('/candidate-documents/{profile}/{documentType}', [CandidateDocumentController::class, 'show']);
 
     Route::get('/applications', [ApplicationController::class, 'index']);
     Route::get('/applications/{application}', [ApplicationController::class, 'show']);

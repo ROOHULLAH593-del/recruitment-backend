@@ -47,7 +47,7 @@ class SemanticMatchScoreTest extends TestCase
     public function test_semantic_match_score_is_calculated_on_application_creation(): void
     {
         $candidate = User::factory()->create();
-        CandidateProfile::factory()->create(['user_id' => $candidate->id, 'resume_text' => 'Experienced PHP developer.']);
+        CandidateProfile::factory()->withRequiredDocuments()->create(['user_id' => $candidate->id, 'resume_text' => 'Experienced PHP developer.']);
         $job = JobPosting::factory()->create(['description' => 'Looking for a PHP developer.']);
         $this->fakeEmbeddings([1.0, 0.0], [1.0, 0.0]);
 
@@ -60,7 +60,7 @@ class SemanticMatchScoreTest extends TestCase
     public function test_application_creation_succeeds_even_when_gemini_fails(): void
     {
         $candidate = User::factory()->create();
-        CandidateProfile::factory()->create([
+        CandidateProfile::factory()->withRequiredDocuments()->create([
             'user_id' => $candidate->id,
             'resume_text' => 'Experienced PHP developer.',
             'skills' => ['PHP'],

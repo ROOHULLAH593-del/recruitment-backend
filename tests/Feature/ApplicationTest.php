@@ -18,7 +18,7 @@ class ApplicationTest extends TestCase
     public function test_candidate_can_apply_to_an_open_job(): void
     {
         $candidate = User::factory()->create();
-        CandidateProfile::factory()->create(['user_id' => $candidate->id]);
+        CandidateProfile::factory()->withRequiredDocuments()->create(['user_id' => $candidate->id]);
         $job = JobPosting::factory()->create();
 
         $response = $this->actingAs($candidate, 'sanctum')->postJson("/api/jobs/{$job->id}/apply");
@@ -37,7 +37,7 @@ class ApplicationTest extends TestCase
     public function test_applying_twice_to_the_same_job_is_rejected(): void
     {
         $candidate = User::factory()->create();
-        CandidateProfile::factory()->create(['user_id' => $candidate->id]);
+        CandidateProfile::factory()->withRequiredDocuments()->create(['user_id' => $candidate->id]);
         $job = JobPosting::factory()->create();
 
         $this->actingAs($candidate, 'sanctum')->postJson("/api/jobs/{$job->id}/apply")->assertCreated();
@@ -85,7 +85,7 @@ class ApplicationTest extends TestCase
     public function test_match_score_is_calculated_on_application_creation(): void
     {
         $candidate = User::factory()->create();
-        CandidateProfile::factory()->create([
+        CandidateProfile::factory()->withRequiredDocuments()->create([
             'user_id' => $candidate->id,
             'skills' => ['PHP', 'React'],
             'years_experience' => 5,
@@ -106,7 +106,7 @@ class ApplicationTest extends TestCase
     public function test_match_score_reflects_partial_match_on_creation(): void
     {
         $candidate = User::factory()->create();
-        CandidateProfile::factory()->create([
+        CandidateProfile::factory()->withRequiredDocuments()->create([
             'user_id' => $candidate->id,
             'skills' => ['PHP'],
             'years_experience' => 0,

@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\CandidateDocumentType;
 use App\Http\Requests\CandidateProfile\UpdateCandidateProfileRequest;
+use App\Http\Requests\CandidateProfile\UploadCandidateDocumentRequest;
 use App\Http\Requests\CandidateProfile\UploadResumeRequest;
 use App\Http\Resources\CandidateProfileResource;
 use App\Services\ResumeParsingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class CandidateProfileController extends Controller
 {
@@ -49,5 +52,28 @@ class CandidateProfileController extends Controller
         }
 
         return response()->json(['data' => $suggested]);
+    }
+
+    /**
+     * Upload (or replace) one of the five document slots on the
+     * authenticated candidate's own profile. The old file, if any, is
+     * deleted from private storage so a replacement never leaves an
+     * orphaned file behind.
+     */
+    public function uploadDocument(UploadCandidateDocumentRequest $request): CandidateProfileResource
+    {
+        $profile = $request->user()->candidateProfile;
+        $documentType = CandidateDocumentType::from($request->validated('document_type'));
+        $column = $documentType->column();
+
+        if ($profile->{$column}) {
+            Storage::disk('local')->delete($profile->{$column});
+        }
+
+        $path = $request->file('file')->store("candidate-documents/{$profile->id}", 'local');
+
+        $profile->update([$column => $path]);
+
+        return new CandidateProfileResource($profile);
     }
 }

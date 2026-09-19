@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\CandidateDocumentType;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -24,6 +25,13 @@ class CandidateProfileResource extends JsonResource
             'skills' => $this->skills,
             'education_level' => $this->education_level?->value,
             'years_experience' => $this->years_experience,
+            // Presence only — never the stored path. Whether a slot is
+            // filled isn't sensitive (unlike the document content itself,
+            // which CandidateDocumentController gates per document type),
+            // so this is safe to expose to any viewer of this resource.
+            'documents' => collect(CandidateDocumentType::cases())->mapWithKeys(
+                fn (CandidateDocumentType $type) => [$type->value => filled($this->{$type->column()})]
+            )->all(),
         ];
     }
 }

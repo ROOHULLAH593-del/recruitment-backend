@@ -36,6 +36,14 @@ class ApplicationController extends Controller
             ], 409);
         }
 
+        $missingDocuments = $request->user()->candidateProfile->missingRequiredDocumentLabels();
+
+        if ($missingDocuments !== []) {
+            throw ValidationException::withMessages([
+                'documents' => ['Please upload the following before applying: '.implode(', ', $missingDocuments).'.'],
+            ]);
+        }
+
         $application = Application::create([
             'job_id' => $job->id,
             'candidate_id' => $request->user()->id,

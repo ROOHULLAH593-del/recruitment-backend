@@ -55,6 +55,7 @@ class InterviewController extends Controller
             ...$request->validated(),
             'application_id' => $application->id,
             'interviewer_id' => $request->user()->id,
+            'video_room' => Interview::generateVideoRoomIdentifier(),
         ]);
 
         $application->update(['status' => ApplicationStatus::InterviewScheduled]);

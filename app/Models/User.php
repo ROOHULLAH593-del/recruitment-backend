@@ -14,12 +14,18 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'username', 'cnic', 'cnic_hash', 'password', 'role'])]
+#[Fillable(['name', 'email', 'username', 'cnic', 'cnic_hash', 'password', 'role', 'failed_login_attempts', 'locked_at'])]
 #[Hidden(['password', 'remember_token', 'cnic', 'cnic_hash'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
+
+    /**
+     * Consecutive wrong-password attempts (on an already-identified
+     * account) before the account locks. See AuthController::login().
+     */
+    public const MAX_FAILED_LOGIN_ATTEMPTS = 3;
 
     /**
      * Get the attributes that should be cast.
@@ -33,7 +39,18 @@ class User extends Authenticatable
             'password' => 'hashed',
             'role' => UserRole::class,
             'cnic' => 'encrypted',
+            'locked_at' => 'datetime',
         ];
+    }
+
+    /**
+     * True once failed login attempts have crossed the lockout threshold.
+     * There's no timer-based expiry — this only clears via a successful
+     * login or password reset (see AuthController).
+     */
+    public function isLocked(): bool
+    {
+        return $this->locked_at !== null;
     }
 
     /**

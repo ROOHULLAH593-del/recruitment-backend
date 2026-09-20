@@ -54,6 +54,11 @@ return [
 
     'url' => env('APP_URL', 'http://localhost'),
 
+    // The React SPA this API serves — used to build links back into it from
+    // server-generated content (currently just the password reset email;
+    // see AppServiceProvider::boot()). Also what config/cors.php allows.
+    'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone

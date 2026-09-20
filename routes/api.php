@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\Route;
 Route::middleware('throttle:6,1')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
     // Public invitation flow — no auth, the token itself is the credential
     // for these two actions. Throttled the same as register/login since

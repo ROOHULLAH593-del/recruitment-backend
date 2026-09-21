@@ -9,9 +9,13 @@ use App\Observers\ApplicationObserver;
 use App\Observers\CandidateProfileObserver;
 use App\Observers\JobPostingObserver;
 use Illuminate\Auth\Notifications\ResetPassword;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
+use InvalidArgumentException;
+use Symfony\Component\Mailer\Bridge\Brevo\Transport\BrevoTransportFactory;
+use Symfony\Component\Mailer\Transport\Dsn;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -39,6 +43,18 @@ class AppServiceProvider extends ServiceProvider
         Application::observe(ApplicationObserver::class);
         CandidateProfile::observe(CandidateProfileObserver::class);
         JobPosting::observe(JobPostingObserver::class);
+
+        // Only built when MAIL_MAILER=brevo, so local development (smtp)
+        // never touches this and needs no Brevo key.
+        Mail::extend('brevo', function () {
+            $key = config('services.brevo.key');
+
+            if (blank($key)) {
+                throw new InvalidArgumentException('BREVO_API_KEY must be set to use the brevo mailer.');
+            }
+
+            return (new BrevoTransportFactory)->create(new Dsn('brevo+api', 'default', $key));
+        });
 
         Password::defaults(fn () => Password::min(8)->letters()->numbers());
 

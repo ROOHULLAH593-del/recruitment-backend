@@ -46,4 +46,10 @@ return [
         'embedding_model' => env('GEMINI_EMBEDDING_MODEL', 'gemini-embedding-2'),
     ],
 
+    'jaas' => [
+        'app_id' => env('JAAS_APP_ID'),
+        'key_id' => env('JAAS_KEY_ID'),
+        'private_key_path' => storage_path(env('JAAS_PRIVATE_KEY_PATH', 'app/private/jaas-private-key.pem')),
+    ],
+
 ];

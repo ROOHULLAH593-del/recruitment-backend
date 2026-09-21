@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Enums\InterviewStatus;
+use App\Services\JaasService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -37,11 +38,21 @@ class InterviewResource extends JsonResource
             'notes' => $this->notes,
             // Only the interview's own candidate and staff ever see this —
             // omitted entirely (not null) for everyone else, and for
-            // anyone once the interview is cancelled. videoRoom() lazily
+            // anyone once the interview is cancelled. videoRoom() (called
+            // inside JaasService::fullRoomName()/tokenFor()) lazily
             // generates+persists the identifier on first access, so this
             // closure only runs (and only writes) when someone authorized
-            // actually looks.
-            'video_room' => $this->when($canViewRoom, fn () => $this->videoRoom()),
+            // actually looks. The JWT is scoped to this one room and to
+            // $viewer specifically — never generated for, or on behalf of,
+            // anyone else.
+            'video_call' => $this->when($canViewRoom, function () use ($viewer) {
+                $jaas = app(JaasService::class);
+
+                return [
+                    'room' => $jaas->fullRoomName($this->resource),
+                    'jwt' => $jaas->tokenFor($this->resource, $viewer),
+                ];
+            }),
             'created_at' => $this->created_at,
         ];
     }

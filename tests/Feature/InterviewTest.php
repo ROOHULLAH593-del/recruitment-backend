@@ -328,6 +328,9 @@ class InterviewTest extends TestCase
         $response = $this->actingAs($admin, 'sanctum')->getJson("/api/interviews/{$targetInterview->id}");
 
         $response->assertOk()->assertJsonPath('data.id', $targetInterview->id);
-        $this->assertSame($targetInterview->fresh()->video_room, $response->json('data.video_room'));
+        $this->assertSame(
+            config('services.jaas.app_id').'/'.strtolower($targetInterview->fresh()->video_room),
+            $response->json('data.video_call.room'),
+        );
     }
 }

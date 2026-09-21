@@ -116,6 +116,20 @@ class InterviewController extends Controller
     }
 
     /**
+     * Display the specified resource. Exists specifically so a client
+     * (e.g. the video call page) can fetch one interview it already knows
+     * the id of directly, rather than paginating through /interviews and
+     * searching client-side — which silently fails once the list is large
+     * enough that the interview in question isn't on the requested page.
+     */
+    public function show(Interview $interview): InterviewResource
+    {
+        $this->authorize('view', $interview);
+
+        return new InterviewResource($interview->load(['application.job', 'application.candidate', 'interviewer']));
+    }
+
+    /**
      * Display a listing of the resource.
      */
     public function index(Request $request): AnonymousResourceCollection

@@ -266,4 +266,68 @@ class InterviewTest extends TestCase
         $response->assertOk();
         $this->assertCount(3, $response->json('data'));
     }
+
+    // --- show() — fetching a single interview by id ---
+
+    public function test_owning_candidate_can_fetch_a_single_interview_by_id(): void
+    {
+        $candidate = User::factory()->create();
+        $application = Application::factory()->create(['candidate_id' => $candidate->id]);
+        $interview = Interview::factory()->create(['application_id' => $application->id]);
+
+        $this->actingAs($candidate, 'sanctum')
+            ->getJson("/api/interviews/{$interview->id}")
+            ->assertOk()
+            ->assertJsonPath('data.id', $interview->id);
+    }
+
+    public function test_another_candidate_cannot_fetch_a_single_interview_by_id(): void
+    {
+        $otherCandidate = User::factory()->create();
+        $interview = Interview::factory()->create();
+
+        $this->actingAs($otherCandidate, 'sanctum')
+            ->getJson("/api/interviews/{$interview->id}")
+            ->assertStatus(403);
+    }
+
+    public function test_hr_can_fetch_a_single_interview_by_id(): void
+    {
+        $hr = User::factory()->hr()->create();
+        $interview = Interview::factory()->create();
+
+        $this->actingAs($hr, 'sanctum')
+            ->getJson("/api/interviews/{$interview->id}")
+            ->assertOk()
+            ->assertJsonPath('data.id', $interview->id);
+    }
+
+    public function test_guest_cannot_fetch_a_single_interview_by_id(): void
+    {
+        $interview = Interview::factory()->create();
+
+        $this->getJson("/api/interviews/{$interview->id}")->assertStatus(401);
+    }
+
+    /**
+     * Regression test for the bug this endpoint was added to fix: the video
+     * call page used to find an interview by paginating /interviews and
+     * searching client-side, which silently failed once an admin's
+     * system-wide list grew past a single page (a candidate's own list is
+     * always small, so the same bug never surfaced for them). Fetching by
+     * id must work regardless of how many other interviews exist.
+     */
+    public function test_admin_can_fetch_a_specific_interview_even_when_it_would_not_fit_on_the_first_page_of_the_index(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $targetInterview = Interview::factory()->create(['scheduled_at' => now()->subYear()]);
+        // Everything else sorts ahead of it in the index's default order
+        // (scheduled_at desc), pushing it well past a 100-per-page listing.
+        Interview::factory()->count(105)->create(['scheduled_at' => now()->addWeek()]);
+
+        $response = $this->actingAs($admin, 'sanctum')->getJson("/api/interviews/{$targetInterview->id}");
+
+        $response->assertOk()->assertJsonPath('data.id', $targetInterview->id);
+        $this->assertSame($targetInterview->fresh()->video_room, $response->json('data.video_room'));
+    }
 }

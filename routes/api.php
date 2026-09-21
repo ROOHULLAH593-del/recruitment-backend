@@ -55,6 +55,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/applications/{application}/interview', [InterviewController::class, 'store']);
 
     Route::get('/interviews', [InterviewController::class, 'index']);
+    Route::get('/interviews/{interview}', [InterviewController::class, 'show']);
     Route::patch('/interviews/{interview}', [InterviewController::class, 'update']);
 
     Route::get('/dashboard/stats', [DashboardController::class, 'index']);

@@ -1,0 +1,57 @@
+# Secrets and environment — configured through Render's dashboard instead
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*service-account*.json
+auth.json
+
+# Everything under storage/ is runtime state (credential files, uploaded
+# candidate documents, logs, caches). entrypoint.sh recreates the skeleton.
+storage/app/private
+storage/app/public
+storage/framework
+storage/logs
+storage/pail
+storage/*.key
+
+# Dependencies are installed fresh inside the image
+vendor
+node_modules
+
+# Local caches — bootstrap/cache would carry dev-only providers (Boost, Pail)
+# that don't exist in a --no-dev install and would crash the app at boot
+bootstrap/cache/*.php
+public/hot
+public/storage
+database/*.sqlite
+**/*.log
+
+# Version control, editor and AI tooling
+.git
+.gitattributes
+.gitignore
+.idea
+.vscode
+.cursor
+.codex
+.claude
+.ai
+.mcp.json
+boost.json
+AGENTS.md
+CLAUDE.md
+.editorconfig
+.phpactor.json
+
+# Tests and their caches
+tests
+phpunit.xml
+.phpunit.cache
+.phpunit.result.cache
+
+# Not needed at runtime
+README.md
+Dockerfile
+.dockerignore
+docker-compose*.yml

@@ -9,6 +9,7 @@ use App\Observers\ApplicationObserver;
 use App\Observers\CandidateProfileObserver;
 use App\Observers\JobPostingObserver;
 use Illuminate\Auth\Notifications\ResetPassword;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
@@ -27,6 +28,14 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // TLS is terminated by the hosting platform's proxy, so PHP itself
+        // only ever sees plain HTTP. Without this every generated URL
+        // (pagination links, signed URLs, ...) would come out as http:// and
+        // be blocked as mixed content by the HTTPS frontend.
+        if ($this->app->environment('production')) {
+            URL::forceScheme('https');
+        }
+
         Application::observe(ApplicationObserver::class);
         CandidateProfile::observe(CandidateProfileObserver::class);
         JobPosting::observe(JobPostingObserver::class);

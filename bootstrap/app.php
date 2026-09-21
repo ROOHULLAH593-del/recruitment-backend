@@ -14,6 +14,13 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->redirectGuestsTo(fn () => null);
+
+        // The app is only reachable through the hosting platform's TLS-
+        // terminating proxy (Render), which reports the original scheme and
+        // client IP via X-Forwarded-* headers. Trusting them lets
+        // $request->isSecure() and $request->ip() (used by the login
+        // throttles) reflect the real client instead of the proxy.
+        $middleware->trustProxies(at: '*');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

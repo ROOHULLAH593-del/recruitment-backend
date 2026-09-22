@@ -30,6 +30,7 @@ return [
 
     'brevo' => [
         'key' => env('BREVO_API_KEY'),
+        'http_client' => env('BREVO_HTTP_CLIENT', 'auto'),
     ],
 
     'slack' => [

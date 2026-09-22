@@ -8,6 +8,7 @@ use App\Models\JobPosting;
 use App\Observers\ApplicationObserver;
 use App\Observers\CandidateProfileObserver;
 use App\Observers\JobPostingObserver;
+use App\Services\LaravelBackedHttpClient;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\URL;
@@ -16,6 +17,7 @@ use Illuminate\Validation\Rules\Password;
 use InvalidArgumentException;
 use Symfony\Component\Mailer\Bridge\Brevo\Transport\BrevoTransportFactory;
 use Symfony\Component\Mailer\Transport\Dsn;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -53,7 +55,7 @@ class AppServiceProvider extends ServiceProvider
                 throw new InvalidArgumentException('BREVO_API_KEY must be set to use the brevo mailer.');
             }
 
-            return (new BrevoTransportFactory)->create(new Dsn('brevo+api', 'default', $key));
+            return (new BrevoTransportFactory(null, $this->brevoHttpClient()))->create(new Dsn('brevo+api', 'default', $key));
         });
 
         Password::defaults(fn () => Password::min(8)->letters()->numbers());
@@ -70,5 +72,28 @@ class AppServiceProvider extends ServiceProvider
                 urlencode($notifiable->getEmailForPasswordReset()),
             );
         });
+    }
+
+    /**
+     * The HTTP client under the Brevo mail transport.
+     *
+     * Symfony's default client needs curl_multi_exec(), which some shared
+     * hosts (InfinityFree) disable, breaking every send. There the transport
+     * goes through Laravel's HTTP client instead (Guzzle, which falls back to
+     * plain curl_exec). Returning null keeps Symfony's default everywhere else,
+     * so local development and other hosts behave exactly as before.
+     *
+     * BREVO_HTTP_CLIENT: "auto" (default), "laravel" to force the fallback,
+     * or "symfony" to force Symfony's client.
+     */
+    private function brevoHttpClient(): ?HttpClientInterface
+    {
+        $useLaravelClient = match (config('services.brevo.http_client')) {
+            'laravel' => true,
+            'symfony' => false,
+            default => ! function_exists('curl_multi_exec'),
+        };
+
+        return $useLaravelClient ? new LaravelBackedHttpClient : null;
     }
 }

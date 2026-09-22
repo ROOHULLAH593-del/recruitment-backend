@@ -44,8 +44,17 @@ class OfferSent extends Notification
 
         return $message
             ->line("This is an exciting moment for us, and we hope you're just as excited to join the team.")
-            ->action('Review Your Offer', url("/applications/{$this->application->id}"))
+            ->action('Review Your Offer', $this->applicationUrl())
             ->line('Please let us know if you have any questions — we look forward to hearing from you soon.');
+    }
+
+    /**
+     * Links into the React SPA — see the identical note on
+     * ApplicationStatusChanged::applicationUrl(), which this mirrors.
+     */
+    private function applicationUrl(): string
+    {
+        return sprintf('%s/applications/%d', rtrim(config('app.frontend_url'), '/'), $this->application->id);
     }
 
     /**

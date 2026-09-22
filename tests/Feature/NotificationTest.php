@@ -210,4 +210,70 @@ class NotificationTest extends TestCase
             }
         );
     }
+
+    // --- Email links point at the frontend, not this API ---
+    //
+    // Notification::action() had been built with url(), which resolves
+    // against APP_URL (this Laravel app's own domain) rather than
+    // FRONTEND_URL (the React SPA) — on any deployment where those differ,
+    // every "View..." link in these emails pointed at a domain with no
+    // matching route at all, rendering as a crash/404 for every recipient,
+    // regardless of whether they were logged in. Locally the two already
+    // differ (:8000 vs :5173), which is what makes these tests meaningful.
+
+    public function test_the_application_status_changed_email_links_to_the_frontend(): void
+    {
+        Notification::fake();
+        $hr = User::factory()->hr()->create();
+        $application = Application::factory()->status(ApplicationStatus::Applied)->create();
+
+        $this->actingAs($hr, 'sanctum')
+            ->patchJson("/api/applications/{$application->id}/status", ['status' => 'shortlisted'])
+            ->assertOk();
+
+        Notification::assertSentTo(
+            $application->candidate,
+            ApplicationStatusChanged::class,
+            fn (ApplicationStatusChanged $notification) => $notification->toMail($application->candidate)->actionUrl
+                === config('app.frontend_url')."/applications/{$application->id}"
+        );
+    }
+
+    public function test_the_offer_sent_email_links_to_the_frontend(): void
+    {
+        Notification::fake();
+        $hr = User::factory()->hr()->create();
+        $application = Application::factory()->status(ApplicationStatus::Interviewed)->create();
+
+        $this->actingAs($hr, 'sanctum')
+            ->patchJson("/api/applications/{$application->id}/status", ['status' => 'offered'])
+            ->assertOk();
+
+        Notification::assertSentTo(
+            $application->candidate,
+            OfferSent::class,
+            fn (OfferSent $notification) => $notification->toMail($application->candidate)->actionUrl
+                === config('app.frontend_url')."/applications/{$application->id}"
+        );
+    }
+
+    public function test_the_interview_scheduled_email_links_to_the_frontend(): void
+    {
+        Notification::fake();
+        $hr = User::factory()->hr()->create();
+        $application = Application::factory()->status(ApplicationStatus::Shortlisted)->create();
+
+        $this->actingAs($hr, 'sanctum')->postJson("/api/applications/{$application->id}/interview", [
+            'scheduled_at' => now()->addWeek()->toDateTimeString(),
+        ])->assertCreated();
+
+        $interview = Interview::where('application_id', $application->id)->firstOrFail();
+
+        Notification::assertSentTo(
+            $application->candidate,
+            InterviewScheduled::class,
+            fn (InterviewScheduled $notification) => $notification->toMail($application->candidate)->actionUrl
+                === config('app.frontend_url')."/interviews/{$interview->id}"
+        );
+    }
 }

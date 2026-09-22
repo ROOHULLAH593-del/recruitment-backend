@@ -47,7 +47,7 @@ class ApplicationStatusChanged extends Notification
         }
 
         return $message
-            ->action('View Your Application', url("/applications/{$this->application->id}"))
+            ->action('View Your Application', $this->applicationUrl())
             ->line('Thank you for your interest in joining our team.');
     }
 
@@ -61,6 +61,20 @@ class ApplicationStatusChanged extends Notification
             'job_id' => $this->application->job_id,
             'status' => $this->application->status->value,
         ];
+    }
+
+    /**
+     * Links into the React SPA (not this API's own domain, which
+     * url()/route() would resolve to) — same rtrim'd-frontend_url pattern as
+     * ResetPassword::createUrlUsing() in AppServiceProvider. Pointing this at
+     * APP_URL instead was the actual bug behind "the email link crashes":
+     * on any deployment where the API and the SPA are different origins,
+     * that produced a link straight into the Laravel app, which has no
+     * /applications/{id} route at all.
+     */
+    private function applicationUrl(): string
+    {
+        return sprintf('%s/applications/%d', rtrim(config('app.frontend_url'), '/'), $this->application->id);
     }
 
     private function label(ApplicationStatus $status): string

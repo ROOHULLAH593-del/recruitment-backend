@@ -46,8 +46,17 @@ class InterviewScheduled extends Notification
         }
 
         return $message
-            ->action('View Interview Details', url("/interviews/{$this->interview->id}"))
+            ->action('View Interview Details', $this->interviewUrl())
             ->line('Please reach out if you have any questions or need to reschedule.');
+    }
+
+    /**
+     * Links into the React SPA (not this API's own domain) — see the
+     * identical note on ApplicationStatusChanged::applicationUrl().
+     */
+    private function interviewUrl(): string
+    {
+        return sprintf('%s/interviews/%d', rtrim(config('app.frontend_url'), '/'), $this->interview->id);
     }
 
     /**

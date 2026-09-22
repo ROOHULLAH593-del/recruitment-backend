@@ -34,11 +34,14 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // TLS is terminated by the hosting platform's proxy, so PHP itself
-        // only ever sees plain HTTP. Without this every generated URL
-        // (pagination links, signed URLs, ...) would come out as http:// and
-        // be blocked as mixed content by the HTTPS frontend.
-        if ($this->app->environment('production')) {
+        // Where TLS is terminated by the hosting platform's proxy, PHP itself
+        // only ever sees plain HTTP, so every generated URL (pagination
+        // links, signed URLs, ...) would come out as http:// and be blocked
+        // as mixed content by an HTTPS frontend. APP_URL is the single source
+        // of truth for whether a deployment is served over HTTPS, rather than
+        // assuming every production environment is — a host without working
+        // HTTPS (APP_URL=http://...) must keep generating http:// links.
+        if (str_starts_with((string) config('app.url'), 'https://')) {
             URL::forceScheme('https');
         }
 

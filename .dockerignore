@@ -1,5 +1,6 @@
 # Secrets and environment — configured through Render's dashboard instead
 **/.env
+render-env.txt
 **/.env.*
 **/*.pem
 **/*.key

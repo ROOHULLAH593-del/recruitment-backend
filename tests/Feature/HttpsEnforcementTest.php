@@ -9,15 +9,26 @@ use Tests\TestCase;
 
 class HttpsEnforcementTest extends TestCase
 {
-    public function test_generated_urls_use_https_in_production(): void
+    public function test_generated_urls_use_https_when_app_url_is_https(): void
     {
-        $this->app['env'] = 'production';
+        config(['app.url' => 'https://recruitment.example.com']);
         (new AppServiceProvider($this->app))->boot();
 
         $this->assertStringStartsWith('https://', url('/some-path'));
     }
 
-    public function test_generated_urls_keep_the_request_scheme_outside_production(): void
+    public function test_a_production_deployment_with_an_http_app_url_is_not_forced_to_https(): void
+    {
+        // e.g. a host without working HTTPS: production alone must not
+        // imply https:// links.
+        $this->app['env'] = 'production';
+        config(['app.url' => 'http://recruitment.example.com']);
+        (new AppServiceProvider($this->app))->boot();
+
+        $this->assertStringStartsWith('http://', url('/some-path'));
+    }
+
+    public function test_generated_urls_keep_the_request_scheme_by_default(): void
     {
         $this->assertStringStartsWith('http://', url('/some-path'));
     }

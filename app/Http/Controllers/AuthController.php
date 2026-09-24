@@ -25,6 +25,13 @@ class AuthController extends Controller
     // clarity about what to do next.
     private const LOCKOUT_MESSAGE = 'Too many failed attempts. Please reset your password.';
 
+    // Distinct from LOCKOUT_MESSAGE on purpose — the two are unrelated
+    // states with unrelated remedies (a password reset clears a lockout;
+    // it does nothing for a deactivated account, only an admin
+    // reactivating it does), so conflating them into one message would
+    // point the user at a fix that doesn't apply.
+    private const DEACTIVATED_MESSAGE = 'This account has been deactivated. Please contact an administrator.';
+
     private const GENERIC_CREDENTIALS_MESSAGE = 'The provided credentials are incorrect.';
 
     public function register(RegisterRequest $request): JsonResponse
@@ -70,6 +77,16 @@ class AuthController extends Controller
             // the response would leak which identifiers are registered.
             throw ValidationException::withMessages([
                 'identifier' => [self::GENERIC_CREDENTIALS_MESSAGE],
+            ]);
+        }
+
+        // Checked before lockout: a deactivated account is an admin
+        // decision that overrides whatever the lockout state happens to be
+        // — it must never resolve to the lockout message instead, since
+        // "reset your password" isn't a way back in here.
+        if ($user->isDeactivated()) {
+            throw ValidationException::withMessages([
+                'identifier' => [self::DEACTIVATED_MESSAGE],
             ]);
         }
 

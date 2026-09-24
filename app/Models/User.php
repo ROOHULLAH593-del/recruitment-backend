@@ -14,7 +14,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'username', 'cnic', 'cnic_hash', 'password', 'role', 'failed_login_attempts', 'locked_at'])]
+#[Fillable(['name', 'email', 'username', 'cnic', 'cnic_hash', 'password', 'role', 'failed_login_attempts', 'locked_at', 'deactivated_at'])]
 #[Hidden(['password', 'remember_token', 'cnic', 'cnic_hash'])]
 class User extends Authenticatable
 {
@@ -40,6 +40,7 @@ class User extends Authenticatable
             'role' => UserRole::class,
             'cnic' => 'encrypted',
             'locked_at' => 'datetime',
+            'deactivated_at' => 'datetime',
         ];
     }
 
@@ -51,6 +52,19 @@ class User extends Authenticatable
     public function isLocked(): bool
     {
         return $this->locked_at !== null;
+    }
+
+    /**
+     * True once an admin has deactivated this account (see
+     * UserController::deactivate()). Independent of isLocked() — the two
+     * are separate state machines with separate ways back in (a password
+     * reset clears a lockout; only an admin reactivating clears this), so
+     * a deactivated-and-locked account stays deactivated even after its
+     * lockout would otherwise have cleared, and vice versa.
+     */
+    public function isDeactivated(): bool
+    {
+        return $this->deactivated_at !== null;
     }
 
     /**

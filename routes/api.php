@@ -69,5 +69,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/admin/invitations', [HrInvitationController::class, 'index']);
         Route::post('/admin/invitations/{invitation}/accept', [HrInvitationController::class, 'accept']);
         Route::post('/admin/invitations/{invitation}/reject', [HrInvitationController::class, 'reject']);
+
+        Route::get('/admin/staff', [UserController::class, 'index']);
+        Route::post('/admin/staff/{user}/deactivate', [UserController::class, 'deactivate']);
+        Route::post('/admin/staff/{user}/reactivate', [UserController::class, 'reactivate']);
     });
 });

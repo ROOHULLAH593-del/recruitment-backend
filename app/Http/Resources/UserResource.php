@@ -31,6 +31,11 @@ class UserResource extends JsonResource
             // entirely rather than null, so its absence can't be mistaken
             // for "this user has no CNIC on file".
             'cnic' => $this->when($canViewCnic, fn () => $this->cnic),
+            // Admin-only (this is exclusively for the deactivate/reactivate
+            // UI) — other viewers of a staff member's UserResource (e.g. a
+            // candidate seeing their interviewer's name) have no reason to
+            // see this.
+            'deactivated_at' => $this->when($viewer?->isAdmin(), fn () => $this->deactivated_at),
         ];
     }
 }

@@ -136,7 +136,7 @@ class InterviewController extends Controller
     {
         $query = Interview::query()
             ->with(['application.job', 'application.candidate', 'interviewer'])
-            ->orderByDesc('scheduled_at')
+            ->orderByDesc('created_at')
             ->orderByDesc('id');
 
         if ($request->user()->isCandidate()) {

@@ -267,6 +267,89 @@ class InterviewTest extends TestCase
         $this->assertCount(3, $response->json('data'));
     }
 
+    // --- index() ordering — most recently created first, like the applications list ---
+
+    public function test_index_lists_interviews_by_creation_not_by_scheduled_date(): void
+    {
+        $hr = User::factory()->hr()->create();
+
+        $oldestCreatedLatestScheduled = Interview::factory()->create([
+            'created_at' => now()->subDays(2),
+            'scheduled_at' => now()->addDays(30),
+        ]);
+        $middle = Interview::factory()->create([
+            'created_at' => now()->subDay(),
+            'scheduled_at' => now()->addDays(2),
+        ]);
+        $newestCreatedEarliestScheduled = Interview::factory()->create([
+            'created_at' => now(),
+            'scheduled_at' => now()->addDay(),
+        ]);
+
+        $this->actingAs($hr, 'sanctum')->getJson('/api/interviews')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $newestCreatedEarliestScheduled->id)
+            ->assertJsonPath('data.1.id', $middle->id)
+            ->assertJsonPath('data.2.id', $oldestCreatedLatestScheduled->id);
+    }
+
+    public function test_index_breaks_creation_ties_by_highest_id_first(): void
+    {
+        $hr = User::factory()->hr()->create();
+        $sameMoment = now();
+
+        $first = Interview::factory()->create(['created_at' => $sameMoment]);
+        $second = Interview::factory()->create(['created_at' => $sameMoment]);
+
+        $this->actingAs($hr, 'sanctum')->getJson('/api/interviews')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $second->id)
+            ->assertJsonPath('data.1.id', $first->id);
+    }
+
+    public function test_a_freshly_scheduled_interview_is_first_in_the_default_list_even_if_its_date_is_sooner(): void
+    {
+        $hr = User::factory()->hr()->create();
+
+        // Already booked far into the future — under a scheduled_at sort these
+        // would all sit above anything scheduled sooner.
+        Interview::factory()->count(3)->create([
+            'scheduled_at' => now()->addMonths(2),
+            'created_at' => now()->subDay(),
+        ]);
+
+        $application = Application::factory()->status(ApplicationStatus::Shortlisted)->create();
+
+        $newInterviewId = $this->actingAs($hr, 'sanctum')->postJson("/api/applications/{$application->id}/interview", [
+            'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+        ])->assertCreated()->json('data.id');
+
+        $this->actingAs($hr, 'sanctum')->getJson('/api/interviews')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $newInterviewId);
+    }
+
+    public function test_candidates_see_their_own_freshly_scheduled_interview_first(): void
+    {
+        $candidate = User::factory()->create();
+        $olderApplication = Application::factory()->create(['candidate_id' => $candidate->id]);
+        Interview::factory()->create([
+            'application_id' => $olderApplication->id,
+            'scheduled_at' => now()->addMonth(),
+            'created_at' => now()->subDay(),
+        ]);
+        $newerApplication = Application::factory()->create(['candidate_id' => $candidate->id]);
+        $newer = Interview::factory()->create([
+            'application_id' => $newerApplication->id,
+            'scheduled_at' => now()->addDays(3),
+            'created_at' => now(),
+        ]);
+
+        $this->actingAs($candidate, 'sanctum')->getJson('/api/interviews')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $newer->id);
+    }
+
     // --- show() — fetching a single interview by id ---
 
     public function test_owning_candidate_can_fetch_a_single_interview_by_id(): void

@@ -12,6 +12,7 @@
         "laravel/framework": "^13.17",
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^3.0",
+        "resend/resend-php": "^1.15",
         "symfony/brevo-mailer": "^7.4",
         "symfony/http-client": "^7.4"
     },

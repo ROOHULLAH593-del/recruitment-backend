@@ -429,4 +429,34 @@ class HrInvitationTest extends TestCase
 
         $this->actingAs($assistantHr, 'sanctum')->getJson('/api/dashboard/stats')->assertOk();
     }
+
+    // --- invited_by/reviewed_by survive deletion of the linked admin ---
+
+    public function test_deleting_the_inviting_admin_preserves_the_invitation_with_invited_by_cleared(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $invitation = HrInvitation::factory()->create(['invited_by' => $admin->id]);
+
+        $admin->delete();
+
+        $this->assertDatabaseHas('hr_invitations', [
+            'id' => $invitation->id,
+            'invited_by' => null,
+        ]);
+        $this->assertNull($invitation->fresh()->invited_by);
+    }
+
+    public function test_deleting_the_reviewing_admin_preserves_the_invitation_with_reviewed_by_cleared(): void
+    {
+        $reviewer = User::factory()->admin()->create();
+        $invitation = HrInvitation::factory()->approved()->create(['reviewed_by' => $reviewer->id]);
+
+        $reviewer->delete();
+
+        $this->assertDatabaseHas('hr_invitations', [
+            'id' => $invitation->id,
+            'reviewed_by' => null,
+        ]);
+        $this->assertNull($invitation->fresh()->reviewed_by);
+    }
 }

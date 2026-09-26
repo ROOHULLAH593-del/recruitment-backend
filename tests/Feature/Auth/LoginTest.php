@@ -149,4 +149,32 @@ class LoginTest extends TestCase
     {
         $this->getJson('/api/user')->assertStatus(401);
     }
+
+    // --- Token expiry (config('sanctum.expiration'), 1 week) ---
+
+    public function test_a_freshly_issued_token_is_accepted(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('api')->plainTextToken;
+
+        $this->withToken($token)->getJson('/api/user')->assertOk();
+    }
+
+    public function test_a_token_still_under_a_week_old_is_accepted(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('api')->plainTextToken;
+        $user->tokens()->first()->forceFill(['created_at' => now()->subDays(6)])->save();
+
+        $this->withToken($token)->getJson('/api/user')->assertOk();
+    }
+
+    public function test_a_token_older_than_a_week_is_rejected(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('api')->plainTextToken;
+        $user->tokens()->first()->forceFill(['created_at' => now()->subDays(8)])->save();
+
+        $this->withToken($token)->getJson('/api/user')->assertStatus(401);
+    }
 }

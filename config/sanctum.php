@@ -50,7 +50,12 @@ return [
     |
     */
 
-    'expiration' => null,
+    // Counted from issuance (created_at), not last use — Sanctum enforces
+    // this the same way regardless of activity, so a session in active use
+    // never gets cut off mid-task, but also never silently renews just by
+    // being used. A user who stays logged in past a week simply logs in
+    // again, which is also when the countdown restarts on the new token.
+    'expiration' => 60 * 24 * 7,
 
     /*
     |--------------------------------------------------------------------------

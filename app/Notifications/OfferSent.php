@@ -4,10 +4,17 @@ namespace App\Notifications;
 
 use App\Models\Application;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-class OfferSent extends Notification
+/**
+ * Queued — see the identical note on ApplicationStatusChanged, which this
+ * mirrors: a slow/hanging mail server must never block the HTTP response a
+ * status change already succeeded at. Needs a queue worker running to
+ * actually send (`php artisan queue:work`, or `composer run dev` locally).
+ */
+class OfferSent extends Notification implements ShouldQueue
 {
     use Queueable;
 

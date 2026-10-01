@@ -5,10 +5,17 @@ namespace App\Notifications;
 use App\Enums\InterviewStatus;
 use App\Models\Interview;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-class InterviewScheduled extends Notification
+/**
+ * Queued — see the identical note on ApplicationStatusChanged, which this
+ * mirrors: a slow/hanging mail server must never block the HTTP response a
+ * status change already succeeded at. Needs a queue worker running to
+ * actually send (`php artisan queue:work`, or `composer run dev` locally).
+ */
+class InterviewScheduled extends Notification implements ShouldQueue
 {
     use Queueable;
 

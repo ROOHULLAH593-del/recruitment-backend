@@ -5,10 +5,24 @@ namespace App\Notifications;
 use App\Enums\ApplicationStatus;
 use App\Models\Application;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-class ApplicationStatusChanged extends Notification
+/**
+ * Queued (not sent inline) — the real mail transports here are all
+ * over-the-network calls with no bound on how long they can take, confirmed
+ * to reach 20+ seconds just to time out against an unreachable host. Sending
+ * inline meant a slow or hanging mail server could make a status-change
+ * request look like it failed to the client even though the status change
+ * itself (already saved to the database beforehand, in every caller) had
+ * gone through — with nothing logged, since the request would often still
+ * succeed, just too slowly for whatever gave up waiting on it. A queue
+ * worker must be running for this to actually send (`php artisan queue:work`,
+ * or `composer run dev`'s built-in `queue:listen`, locally) — nothing
+ * processes it otherwise, the same as before this had no effect at all.
+ */
+class ApplicationStatusChanged extends Notification implements ShouldQueue
 {
     use Queueable;
 

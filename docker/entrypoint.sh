@@ -143,5 +143,5 @@ chown -R www-data:www-data storage bootstrap/cache
 sed "s/__PORT__/${PORT:-10000}/" /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
 nginx -t
 
-log "Starting nginx + php-fpm on port ${PORT:-10000}."
+log "Starting nginx + php-fpm + queue worker on port ${PORT:-10000}."
 exec /usr/bin/supervisord --nodaemon --configuration /etc/supervisord.conf

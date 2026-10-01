@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Notifications\ApplicationStatusChanged;
 use App\Notifications\InterviewScheduled;
 use App\Notifications\OfferSent;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
@@ -17,6 +18,30 @@ use Tests\TestCase;
 class NotificationTest extends TestCase
 {
     use RefreshDatabase;
+
+    // --- These must stay queued: a mail server this app has no control over
+    // (Brevo, Resend, or a client's own Gmail SMTP) can hang or run slowly for
+    // 20+ seconds with nothing logged, and sending inline would turn that into
+    // a failed-looking HTTP response for a status change that had already
+    // saved successfully. A queue worker must be running for this to actually
+    // take effect (`php artisan queue:work`, or `composer run dev` locally) —
+    // these only prove the notifications are marked to be queued, not that
+    // something is draining the queue.
+
+    public function test_application_status_changed_is_queued(): void
+    {
+        $this->assertInstanceOf(ShouldQueue::class, new ApplicationStatusChanged(new Application));
+    }
+
+    public function test_offer_sent_is_queued(): void
+    {
+        $this->assertInstanceOf(ShouldQueue::class, new OfferSent(new Application));
+    }
+
+    public function test_interview_scheduled_is_queued(): void
+    {
+        $this->assertInstanceOf(ShouldQueue::class, new InterviewScheduled(new Interview));
+    }
 
     public function test_offer_sent_notification_fires_when_status_becomes_offered(): void
     {

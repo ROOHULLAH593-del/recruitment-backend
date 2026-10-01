@@ -6,6 +6,7 @@ use App\Enums\InterviewStatus;
 use App\Services\JaasService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Http\Resources\MissingValue;
 
 class InterviewResource extends JsonResource
 {
@@ -37,9 +38,13 @@ class InterviewResource extends JsonResource
             'status' => $this->status->value,
             'notes' => $this->notes,
             // Only the interview's own candidate and staff ever see this —
-            // omitted entirely (not null) for everyone else, and for
-            // anyone once the interview is cancelled. videoRoom() (called
-            // inside JaasService::fullRoomName()/tokenFor()) lazily
+            // omitted entirely (not null) for everyone else, for anyone once
+            // the interview is cancelled, and — same reasoning as
+            // GoogleCalendarService — for everyone if JaaS isn't configured
+            // or its key can't be read, since video calling is a feature an
+            // interview can run without, not a requirement for the rest of
+            // the response. videoRoom() (called inside
+            // JaasService::fullRoomName()/tokenFor()) lazily
             // generates+persists the identifier on first access, so this
             // closure only runs (and only writes) when someone authorized
             // actually looks. The JWT is scoped to this one room and to
@@ -47,10 +52,15 @@ class InterviewResource extends JsonResource
             // anyone else.
             'video_call' => $this->when($canViewRoom, function () use ($viewer) {
                 $jaas = app(JaasService::class);
+                $jwt = $jaas->tokenFor($this->resource, $viewer);
+
+                if (! $jwt) {
+                    return new MissingValue;
+                }
 
                 return [
                     'room' => $jaas->fullRoomName($this->resource),
-                    'jwt' => $jaas->tokenFor($this->resource, $viewer),
+                    'jwt' => $jwt,
                 ];
             }),
             'created_at' => $this->created_at,

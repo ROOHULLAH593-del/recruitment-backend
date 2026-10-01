@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\Interview;
 use App\Models\User;
 use Firebase\JWT\JWT;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Builds the room name and signed JWT a client needs to join an interview's
@@ -25,6 +27,10 @@ class JaasService
      * not so long that a leaked token stays useful for long.
      */
     private const TOKEN_LIFETIME_SECONDS = 60 * 60 * 3;
+
+    private ?string $privateKey = null;
+
+    private bool $privateKeyLoadFailed = false;
 
     /**
      * The room identifier as JaaS's own room@conference XMPP address
@@ -51,9 +57,21 @@ class JaasService
      * A signed, room-scoped JWT authorizing $user to join $interview's call.
      * Deliberately scoped to this one room (never "*") — a token leaked
      * from one interview must not double as access to any other.
+     *
+     * Returns null — logging the reason, same as GoogleCalendarService — if
+     * JaaS isn't configured yet or its credential can't be read. Video
+     * calling is a feature an interview can be scheduled and conducted
+     * without, so a missing key must never take the rest of the request
+     * down with it.
      */
-    public function tokenFor(Interview $interview, User $user): string
+    public function tokenFor(Interview $interview, User $user): ?string
     {
+        $privateKey = $this->privateKey();
+
+        if (! $privateKey) {
+            return null;
+        }
+
         $now = time();
 
         $payload = [
@@ -80,8 +98,55 @@ class JaasService
             ],
         ];
 
-        $privateKey = file_get_contents(config('services.jaas.private_key_path'));
+        try {
+            return JWT::encode($payload, $privateKey, 'RS256', config('services.jaas.key_id'));
+        } catch (Throwable $e) {
+            Log::error('Failed to sign a JaaS video-call token.', [
+                'interview_id' => $interview->id,
+                'exception' => $e->getMessage(),
+            ]);
 
-        return JWT::encode($payload, $privateKey, 'RS256', config('services.jaas.key_id'));
+            return null;
+        }
+    }
+
+    /**
+     * Lazily read (and memoize) the JaaS private key. Returns null — logging
+     * the reason — if it's missing or unreadable, mirroring
+     * GoogleCalendarService::client()'s own missing-credential handling.
+     */
+    private function privateKey(): ?string
+    {
+        if ($this->privateKey !== null) {
+            return $this->privateKey;
+        }
+
+        if ($this->privateKeyLoadFailed) {
+            return null;
+        }
+
+        $path = config('services.jaas.private_key_path');
+
+        if (! $path || ! is_file($path)) {
+            $this->privateKeyLoadFailed = true;
+
+            Log::warning('JaaS private key file not found; skipping video call token generation.', [
+                'path' => $path,
+            ]);
+
+            return null;
+        }
+
+        $contents = @file_get_contents($path);
+
+        if ($contents === false) {
+            $this->privateKeyLoadFailed = true;
+
+            Log::error('Failed to read the JaaS private key file.', ['path' => $path]);
+
+            return null;
+        }
+
+        return $this->privateKey = $contents;
     }
 }

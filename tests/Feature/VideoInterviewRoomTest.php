@@ -281,4 +281,69 @@ class VideoInterviewRoomTest extends TestCase
         // nothing worth persisting either.
         $this->assertNull($interview->fresh()->video_room);
     }
+
+    // --- Graceful degradation when JaaS isn't configured (a real handover bug:
+    // a missing key used to 500 the entire Applications/Interviews response) ---
+
+    public function test_interviews_list_loads_normally_with_no_video_call_when_the_jaas_key_is_missing(): void
+    {
+        config(['services.jaas.private_key_path' => storage_path('app/private/does-not-exist.pem')]);
+
+        $hr = User::factory()->hr()->create();
+        $interview = Interview::factory()->create();
+
+        $this->actingAs($hr, 'sanctum')
+            ->getJson('/api/interviews')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $interview->id)
+            ->assertJsonMissingPath('data.0.video_call');
+    }
+
+    public function test_applications_list_loads_normally_with_no_video_call_when_the_jaas_key_is_missing(): void
+    {
+        config(['services.jaas.private_key_path' => storage_path('app/private/does-not-exist.pem')]);
+
+        $hr = User::factory()->hr()->create();
+        $application = Application::factory()->status(ApplicationStatus::InterviewScheduled)->create();
+        Interview::factory()->create(['application_id' => $application->id]);
+
+        $this->actingAs($hr, 'sanctum')
+            ->getJson('/api/applications')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $application->id)
+            ->assertJsonMissingPath('data.0.interview.video_call');
+    }
+
+    public function test_a_single_application_with_an_interview_still_loads_when_the_jaas_key_is_missing(): void
+    {
+        config(['services.jaas.private_key_path' => storage_path('app/private/does-not-exist.pem')]);
+
+        $candidate = User::factory()->create();
+        $application = Application::factory()->create(['candidate_id' => $candidate->id]);
+        Interview::factory()->create(['application_id' => $application->id]);
+
+        $this->actingAs($candidate, 'sanctum')
+            ->getJson("/api/applications/{$application->id}")
+            ->assertOk()
+            ->assertJsonMissingPath('data.interview.video_call');
+    }
+
+    public function test_interviews_list_loads_normally_when_the_jaas_key_file_is_not_a_valid_key(): void
+    {
+        $badKeyPath = storage_path('app/private/not-a-real-key-'.uniqid().'.pem');
+        file_put_contents($badKeyPath, "this is not a PEM private key\n");
+        config(['services.jaas.private_key_path' => $badKeyPath]);
+
+        $hr = User::factory()->hr()->create();
+        Interview::factory()->create();
+
+        try {
+            $this->actingAs($hr, 'sanctum')
+                ->getJson('/api/interviews')
+                ->assertOk()
+                ->assertJsonMissingPath('data.0.video_call');
+        } finally {
+            unlink($badKeyPath);
+        }
+    }
 }

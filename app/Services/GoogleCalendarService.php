@@ -38,7 +38,7 @@ class GoogleCalendarService
      */
     public function createEvent(Interview $interview): ?string
     {
-        $calendarId = $this->calendarId();
+        $calendarId = $this->calendarIdOrLogWarning();
         $service = $calendarId ? $this->client() : null;
 
         if (! $service || ! $calendarId) {
@@ -50,6 +50,17 @@ class GoogleCalendarService
                 $calendarId,
                 new Event($this->buildEventPayload($interview)),
             );
+
+            // The only confirmation, short of opening the calendar itself,
+            // that this landed where intended — a wrong-but-valid
+            // GOOGLE_CALENDAR_ID (the service account's own default calendar,
+            // say, instead of the one actually shared and being checked)
+            // still returns a real event ID here with no error at all.
+            Log::info('Created Google Calendar event for interview.', [
+                'interview_id' => $interview->id,
+                'event_id' => $event->getId(),
+                'calendar_id' => $calendarId,
+            ]);
 
             return $event->getId();
         } catch (Throwable $e) {
@@ -71,7 +82,7 @@ class GoogleCalendarService
             return;
         }
 
-        $calendarId = $this->calendarId();
+        $calendarId = $this->calendarIdOrLogWarning();
         $service = $calendarId ? $this->client() : null;
 
         if (! $service || ! $calendarId) {
@@ -102,7 +113,7 @@ class GoogleCalendarService
             return;
         }
 
-        $calendarId = $this->calendarId();
+        $calendarId = $this->calendarIdOrLogWarning();
         $service = $calendarId ? $this->client() : null;
 
         if (! $service || ! $calendarId) {
@@ -120,9 +131,25 @@ class GoogleCalendarService
         }
     }
 
-    private function calendarId(): ?string
+    /**
+     * Returns null — logging the reason, same as a missing credentials
+     * file — if GOOGLE_CALENDAR_ID isn't set. Found missing on a real
+     * handover: this previously returned null silently here, with nothing
+     * in the logs to distinguish "the ID never actually loaded" (a stale
+     * config:cache, a typo in the .env key) from "an event was created and
+     * genuinely delivered, just to a calendar other than the one being
+     * checked" — a wrong-but-valid ID throws no error either, since the API
+     * call itself succeeds.
+     */
+    private function calendarIdOrLogWarning(): ?string
     {
-        return config('services.google_calendar.calendar_id') ?: null;
+        $calendarId = config('services.google_calendar.calendar_id') ?: null;
+
+        if (! $calendarId) {
+            Log::warning('GOOGLE_CALENDAR_ID is not configured; skipping calendar sync.');
+        }
+
+        return $calendarId;
     }
 
     /**

@@ -12,7 +12,9 @@ use App\Notifications\InterviewScheduled;
 use App\Notifications\OfferSent;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Notifications\SendQueuedNotifications;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class NotificationTest extends TestCase
@@ -41,6 +43,54 @@ class NotificationTest extends TestCase
     public function test_interview_scheduled_is_queued(): void
     {
         $this->assertInstanceOf(ShouldQueue::class, new InterviewScheduled(new Interview));
+    }
+
+    // --- Exactly one job per channel, per actual triggering action ---
+    //
+    // A worker log that shows one success followed by several failed
+    // attempts for the same status change is NOT, on its own, evidence of a
+    // duplicate notify() call: via() below returns two channels
+    // (database, mail), and Illuminate\Notifications\NotificationSender
+    // queues a separate SendQueuedNotifications job per channel by design —
+    // confirmed by reading its source, not assumed. A worker started with
+    // --tries=3 (as docker/supervisord.conf now runs) then legitimately
+    // retries the failing mail job up to three times on its own, while the
+    // sibling database job already succeeded once. Reproduced this exact
+    // "1 success + 3 failures" sequence live against a real queue worker:
+    // one notify() call, two jobs, one short-lived success and one job
+    // retried three times before landing in failed_jobs — not four separate
+    // dispatches. These tests guard against the bug that pattern was
+    // mistaken for: a real duplicate, which would push 4 jobs, not 2.
+
+    public function test_a_single_status_change_queues_exactly_one_job_per_notification_channel(): void
+    {
+        Queue::fake();
+
+        $hr = User::factory()->hr()->create();
+        $application = Application::factory()->status(ApplicationStatus::Applied)->create();
+
+        $this->actingAs($hr, 'sanctum')
+            ->patchJson("/api/applications/{$application->id}/status", ['status' => 'shortlisted'])
+            ->assertOk();
+
+        // ApplicationStatusChanged::via() => ['database', 'mail']: two jobs
+        // is correct. Four would mean notify() ran twice for one request.
+        Queue::assertPushed(SendQueuedNotifications::class, 2);
+    }
+
+    public function test_a_single_interview_scheduling_queues_exactly_one_job_per_notification_channel(): void
+    {
+        Queue::fake();
+
+        $hr = User::factory()->hr()->create();
+        $application = Application::factory()->status(ApplicationStatus::Shortlisted)->create();
+
+        $this->actingAs($hr, 'sanctum')->postJson("/api/applications/{$application->id}/interview", [
+            'scheduled_at' => now()->addWeek()->toDateTimeString(),
+        ])->assertCreated();
+
+        // InterviewScheduled::via() => ['database', 'mail']: same as above.
+        Queue::assertPushed(SendQueuedNotifications::class, 2);
     }
 
     public function test_offer_sent_notification_fires_when_status_becomes_offered(): void

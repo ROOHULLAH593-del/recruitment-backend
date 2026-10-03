@@ -126,7 +126,10 @@ class InterviewController extends Controller
     {
         $this->authorize('view', $interview);
 
-        return new InterviewResource($interview->load(['application.job', 'application.candidate', 'interviewer']));
+        // The one call site that actually needs a real, signed video_call —
+        // this is what CallPage fetches to join.
+        return (new InterviewResource($interview->load(['application.job', 'application.candidate', 'interviewer'])))
+            ->withVideoCallToken();
     }
 
     /**

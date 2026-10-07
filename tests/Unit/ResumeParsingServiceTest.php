@@ -4,14 +4,19 @@ namespace Tests\Unit;
 
 use App\Enums\ResumeParseOutcome;
 use App\Services\ResumeParsingService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Sleep;
+use Tests\Support\BuildsTestPdfs;
 use Tests\TestCase;
 
 class ResumeParsingServiceTest extends TestCase
 {
+    use BuildsTestPdfs;
+    use RefreshDatabase;
+
     private ResumeParsingService $service;
 
     protected function setUp(): void
@@ -330,6 +335,88 @@ class ResumeParsingServiceTest extends TestCase
 
         $this->assertSame(ResumeParseOutcome::Busy, $result->outcome);
         Http::assertSentCount(3);
+    }
+
+    // --- Second fallback model ---
+
+    public function test_falls_back_to_the_second_configured_model_when_the_first_fallback_also_stays_busy(): void
+    {
+        config(['services.gemini.fallback_model' => 'gemini-3.8-flash', 'services.gemini.fallback_model_2' => 'gemini-3.5-flash-lite']);
+
+        Http::fake([
+            '*/models/gemini-2.5-flash:generateContent*' => Http::response(['error' => ['message' => 'overloaded']], 503),
+            '*/models/gemini-3.8-flash:generateContent*' => Http::response(['error' => ['message' => 'overloaded']], 503),
+            '*/models/gemini-3.5-flash-lite:generateContent*' => Http::response($this->okBody(), 200),
+        ]);
+
+        $result = $this->service->parse('contents');
+
+        $this->assertSame(ResumeParseOutcome::Ok, $result->outcome);
+        $this->assertSame('ai', $result->source);
+        // 3 primary attempts + 1 first-fallback attempt + 1 second-fallback attempt.
+        Http::assertSentCount(5);
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'gemini-3.5-flash-lite:generateContent'));
+    }
+
+    public function test_does_not_use_the_second_fallback_model_when_the_first_fallback_succeeds(): void
+    {
+        config(['services.gemini.fallback_model' => 'gemini-3.8-flash', 'services.gemini.fallback_model_2' => 'gemini-3.5-flash-lite']);
+
+        Http::fake([
+            '*/models/gemini-2.5-flash:generateContent*' => Http::response(['error' => ['message' => 'overloaded']], 503),
+            '*/models/gemini-3.8-flash:generateContent*' => Http::response($this->okBody(), 200),
+            '*/models/gemini-3.5-flash-lite:generateContent*' => Http::response($this->okBody(), 200),
+        ]);
+
+        $result = $this->service->parse('contents');
+
+        $this->assertSame(ResumeParseOutcome::Ok, $result->outcome);
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'gemini-3.5-flash-lite:generateContent'));
+    }
+
+    // --- Local, non-AI fallback (after the whole model chain is exhausted) ---
+
+    public function test_falls_back_to_local_extraction_when_every_model_in_the_chain_stays_busy(): void
+    {
+        config(['services.gemini.fallback_model' => 'gemini-3.8-flash', 'services.gemini.fallback_model_2' => 'gemini-3.5-flash-lite']);
+        $this->fakeGeminiResponse(['error' => ['message' => 'overloaded']], 503);
+
+        $result = $this->service->parse($this->textPdf('5 years of experience. Bachelor of Science. PHP skills.'));
+
+        $this->assertSame(ResumeParseOutcome::Ok, $result->outcome);
+        $this->assertSame('basic', $result->source);
+        $this->assertSame(5, $result->data['years_experience']);
+    }
+
+    public function test_does_not_run_local_extraction_when_the_ai_call_succeeds(): void
+    {
+        $this->fakeGeminiResponse($this->okBody());
+
+        $result = $this->service->parse('contents');
+
+        $this->assertSame('ai', $result->source);
+    }
+
+    public function test_falls_back_to_local_extraction_directly_when_the_api_key_is_missing(): void
+    {
+        config(['services.gemini.api_key' => null]);
+        Http::fake();
+
+        $result = $this->service->parse($this->textPdf('3 years of experience. PHP, Laravel.'));
+
+        $this->assertSame(ResumeParseOutcome::Ok, $result->outcome);
+        $this->assertSame('basic', $result->source);
+        Http::assertNothingSent();
+    }
+
+    public function test_does_not_run_local_extraction_when_the_primary_fails_as_unreadable(): void
+    {
+        $this->fakeGeminiResponse(['error' => ['message' => 'invalid']], 400);
+
+        $result = $this->service->parse($this->textPdf('5 years of experience.'));
+
+        $this->assertSame(ResumeParseOutcome::Unreadable, $result->outcome);
+        $this->assertNull($result->data);
     }
 
     // --- Attempt logging (no resume content) ---

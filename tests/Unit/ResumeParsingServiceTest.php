@@ -24,7 +24,12 @@ class ResumeParsingServiceTest extends TestCase
         parent::setUp();
 
         $this->service = new ResumeParsingService;
-        config(['services.gemini.api_key' => 'test-api-key', 'services.gemini.model' => 'gemini-2.5-flash', 'services.gemini.fallback_model' => null]);
+        config([
+            'services.gemini.api_key' => 'test-api-key',
+            'services.gemini.model' => 'gemini-2.5-flash',
+            'services.gemini.fallback_model' => null,
+            'services.gemini.fallback_model_2' => null,
+        ]);
 
         // Real backoffs (2s, 5s) would make every retry test slow for no
         // reason — Sleep::fake() lets the retry logic run for real without
@@ -419,6 +424,69 @@ class ResumeParsingServiceTest extends TestCase
         $this->assertNull($result->data);
     }
 
+    // --- Time budget ---
+
+    public function test_caps_each_attempts_timeout_by_the_remaining_budget(): void
+    {
+        $cappedTimeout = new \ReflectionMethod(ResumeParsingService::class, 'cappedTimeout');
+
+        $this->assertSame(10.0, $cappedTimeout->invoke(null, 15.0, 10.0));
+        $this->assertSame(15.0, $cappedTimeout->invoke(null, 15.0, 20.0));
+    }
+
+    public function test_stops_the_model_chain_once_the_total_budget_is_spent_and_falls_back_locally(): void
+    {
+        config(['services.gemini.total_budget' => 1, 'services.gemini.fallback_model' => 'gemini-3.8-flash']);
+        $this->fakeGeminiResponse(['error' => ['message' => 'overloaded']], 503);
+
+        $result = $this->service->parse($this->textPdf('5 years of experience. PHP.'));
+
+        // Budget (1s) is already below the 3s floor after the very first
+        // attempt, so neither a primary retry nor the fallback model ever starts.
+        Http::assertSentCount(1);
+        $this->assertSame(ResumeParseOutcome::Ok, $result->outcome);
+        $this->assertSame('basic', $result->source);
+    }
+
+    public function test_a_scan_still_reports_busy_rather_than_basic_once_the_budget_is_spent(): void
+    {
+        config(['services.gemini.total_budget' => 1]);
+        $this->fakeGeminiResponse(['error' => ['message' => 'overloaded']], 503);
+
+        $result = $this->service->parse($this->scannedImageOnlyPdf());
+
+        $this->assertSame(ResumeParseOutcome::Busy, $result->outcome);
+    }
+
+    public function test_does_not_start_a_retry_once_its_backoff_would_exceed_the_remaining_budget(): void
+    {
+        // Sleep::fake(syncWithCarbon: true) makes a faked Sleep::sleep()
+        // actually advance Carbon's test time by the slept duration, so the
+        // budget math below plays out deterministically without a real wait.
+        Sleep::fake(syncWithCarbon: true);
+        config(['services.gemini.total_budget' => 9]);
+        $this->fakeGeminiResponse(['error' => ['message' => 'overloaded']], 503);
+
+        $result = $this->service->parse('contents');
+
+        // t=0: attempt 1 (busy). remaining=9 >= 2+3, sleep 2s -> t=2.
+        // t=2: attempt 2 (busy). remaining=7 < 5+3, so no second backoff/attempt.
+        $this->assertSame(ResumeParseOutcome::Busy, $result->outcome);
+        Http::assertSentCount(2);
+        Sleep::assertSlept(fn ($duration) => $duration->totalSeconds == 2, times: 1);
+    }
+
+    public function test_a_healthy_primary_model_succeeds_on_the_first_attempt(): void
+    {
+        $this->fakeGeminiResponse($this->okBody());
+
+        $result = $this->service->parse('contents');
+
+        $this->assertSame(ResumeParseOutcome::Ok, $result->outcome);
+        $this->assertSame('ai', $result->source);
+        Http::assertSentCount(1);
+    }
+
     // --- Attempt logging (no resume content) ---
 
     public function test_logs_each_attempt_with_model_status_and_duration(): void
@@ -436,6 +504,7 @@ class ResumeParsingServiceTest extends TestCase
                 && $context['attempt'] === 1
                 && $context['status'] === '200'
                 && isset($context['duration_s'])
+                && isset($context['remaining_budget_s'])
             );
     }
 }

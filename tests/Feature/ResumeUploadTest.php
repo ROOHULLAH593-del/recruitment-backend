@@ -21,7 +21,11 @@ class ResumeUploadTest extends TestCase
     {
         parent::setUp();
 
-        config(['services.gemini.api_key' => 'test-api-key', 'services.gemini.fallback_model' => null]);
+        config([
+            'services.gemini.api_key' => 'test-api-key',
+            'services.gemini.fallback_model' => null,
+            'services.gemini.fallback_model_2' => null,
+        ]);
         // Real backoffs (2s, 5s) would make the busy-response tests below
         // slow for no reason.
         Sleep::fake();
@@ -203,7 +207,7 @@ class ResumeUploadTest extends TestCase
         CandidateProfile::factory()->create(['user_id' => $candidate->id]);
         config(['services.gemini.fallback_model' => 'gemini-3.8-flash']);
         Http::fake([
-            '*/models/gemini-3.6-flash:generateContent*' => Http::response(['error' => 'overloaded'], 503),
+            '*/models/gemini-3.5-flash-lite:generateContent*' => Http::response(['error' => 'overloaded'], 503),
             '*/models/gemini-3.8-flash:generateContent*' => Http::response([
                 'candidates' => [['content' => ['parts' => [['text' => json_encode([
                     'skills' => ['PHP'], 'education_level' => 'bachelors', 'years_experience' => 4, 'resume_text' => 'x',
@@ -237,6 +241,21 @@ class ResumeUploadTest extends TestCase
         }
 
         $response->assertStatus(503)->assertJsonPath('category', 'busy');
+    }
+
+    public function test_running_out_of_time_budget_stops_the_chain_and_still_fills_in_what_it_can_locally(): void
+    {
+        config(['services.gemini.total_budget' => 1]);
+        $candidate = User::factory()->create();
+        CandidateProfile::factory()->create(['user_id' => $candidate->id]);
+        Http::fake(['generativelanguage.googleapis.com/*' => Http::response(['error' => 'overloaded'], 503)]);
+
+        $response = $this->uploadTextPdf($candidate, '5 years of experience. PHP.');
+
+        // The 1s budget is already spent after the very first attempt, so
+        // no retry or fallback model is ever tried.
+        Http::assertSentCount(1);
+        $response->assertOk()->assertJson(['source' => 'basic']);
     }
 
     public function test_an_encrypted_pdf_returns_unreadable_without_fabricating_fields_even_when_gemini_is_busy(): void

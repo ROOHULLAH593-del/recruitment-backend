@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\ResumeParseOutcome;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Sleep;
@@ -28,25 +29,30 @@ use Throwable;
  * gets one try at filling the same fields straight from the PDF's own text,
  * no AI involved — confirmed live that even two Gemini models can both be
  * overloaded at once, and the upload shouldn't be a dead end when that happens.
+ *
+ * GEMINI_ATTEMPT_TIMEOUT and GEMINI_TOTAL_BUDGET (services.gemini.attempt_timeout
+ * / total_budget) cap, respectively, a single HTTP attempt and the whole
+ * chain (every attempt plus backoff wait, across every model) — a live log
+ * showed a heavier model hang for the full 30s with nothing received, so
+ * each attempt's own timeout is also capped by whatever of the total
+ * budget is left, and no new attempt or backoff starts with under ~3s of
+ * budget remaining. Once the budget is gone the chain stops right there
+ * and falls through to the local text fallback same as running out of
+ * models to try.
  */
 class ResumeParsingService
 {
     private const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent';
 
-    // Shorter than the old single 45s call: this is per attempt, and up to
-    // three attempts at the primary model plus one at the fallback can now
-    // happen in a single parse() call, bounded by TOTAL_TIME_BUDGET_SECONDS.
-    private const PER_ATTEMPT_TIMEOUT_SECONDS = 30;
-
-    // Across every attempt and backoff combined. A slow-but-eventually-
-    // responding attempt can still run past this on its own (an in-flight
-    // HTTP call can't be aborted mid-flight), but no *new* attempt or
-    // backoff is started once it's exceeded.
-    private const TOTAL_TIME_BUDGET_SECONDS = 60;
+    // Below this much remaining budget, don't bother starting another
+    // attempt (or the backoff sleep before one) — it's not enough time for
+    // a real response, and every second here is a second not spent on the
+    // local text fallback below.
+    private const MIN_BUDGET_TO_START_SECONDS = 3.0;
 
     // Only for a Busy outcome (429/503/timeout) — two retries at the
-    // primary model, waited out before each, then one final attempt at the
-    // fallback model if one is configured and still within budget.
+    // primary model, waited out before each, then one final attempt at
+    // each configured fallback model if still within budget.
     private const RETRY_BACKOFF_SECONDS = [2, 5];
 
     private const PROMPT = <<<'PROMPT'
@@ -71,7 +77,9 @@ class ResumeParsingService
             return $this->localExtraction->extractAsFallback($pdfContents, ResumeParseOutcome::Unavailable);
         }
 
-        $deadline = microtime(true) + self::TOTAL_TIME_BUDGET_SECONDS;
+        $attemptTimeout = (float) config('services.gemini.attempt_timeout', 15);
+        $totalBudget = (float) config('services.gemini.total_budget', 35);
+        $deadline = self::now() + $totalBudget;
         $primaryModel = config('services.gemini.model');
 
         // Order: primary (with its own retries), then each configured
@@ -82,18 +90,25 @@ class ResumeParsingService
             config('services.gemini.fallback_model_2'),
         ]));
 
-        $result = $this->attemptWithRetries($primaryModel, $pdfContents, $apiKey, $deadline);
+        $result = $this->attemptWithRetries($primaryModel, $pdfContents, $apiKey, $deadline, $attemptTimeout);
 
         foreach ($fallbackModels as $fallbackModel) {
-            if ($result->outcome !== ResumeParseOutcome::Busy || microtime(true) >= $deadline) {
+            if ($result->outcome !== ResumeParseOutcome::Busy) {
                 break;
             }
 
-            $result = $this->attempt($fallbackModel, $pdfContents, $apiKey, 'fallback');
+            $remaining = $deadline - self::now();
+
+            if ($remaining < self::MIN_BUDGET_TO_START_SECONDS) {
+                break;
+            }
+
+            $result = $this->attempt($fallbackModel, $pdfContents, $apiKey, 'fallback', self::cappedTimeout($attemptTimeout, $remaining), $remaining);
         }
 
-        // Only here, once every model is exhausted — never on Unreadable
-        // or Empty, which already have a real, correct answer.
+        // Only here, once every model is exhausted (or the budget ran out
+        // first) — never on Unreadable or Empty, which already have a
+        // real, correct answer.
         if (in_array($result->outcome, [ResumeParseOutcome::Busy, ResumeParseOutcome::Unavailable], true)) {
             return $this->localExtraction->extractAsFallback($pdfContents, $result->outcome);
         }
@@ -101,44 +116,49 @@ class ResumeParsingService
         return $result;
     }
 
-    private function attemptWithRetries(string $model, string $pdfContents, string $apiKey, float $deadline): ResumeParseResult
+    private function attemptWithRetries(string $model, string $pdfContents, string $apiKey, float $deadline, float $attemptTimeout): ResumeParseResult
     {
-        $result = $this->attempt($model, $pdfContents, $apiKey, 1);
+        $remaining = $deadline - self::now();
+        $result = $this->attempt($model, $pdfContents, $apiKey, 1, self::cappedTimeout($attemptTimeout, $remaining), $remaining);
 
         foreach (self::RETRY_BACKOFF_SECONDS as $i => $backoffSeconds) {
             if ($result->outcome !== ResumeParseOutcome::Busy) {
                 return $result;
             }
 
-            if (microtime(true) + $backoffSeconds >= $deadline) {
+            $remaining = $deadline - self::now();
+
+            if ($remaining < $backoffSeconds + self::MIN_BUDGET_TO_START_SECONDS) {
                 return $result;
             }
 
             Sleep::sleep($backoffSeconds);
 
-            if (microtime(true) >= $deadline) {
+            $remaining = $deadline - self::now();
+
+            if ($remaining < self::MIN_BUDGET_TO_START_SECONDS) {
                 return $result;
             }
 
-            $result = $this->attempt($model, $pdfContents, $apiKey, $i + 2);
+            $result = $this->attempt($model, $pdfContents, $apiKey, $i + 2, self::cappedTimeout($attemptTimeout, $remaining), $remaining);
         }
 
         return $result;
     }
 
-    private function attempt(string $model, string $pdfContents, string $apiKey, int|string $attemptLabel): ResumeParseResult
+    private function attempt(string $model, string $pdfContents, string $apiKey, int|string $attemptLabel, float $timeoutSeconds, float $remainingBudgetSeconds): ResumeParseResult
     {
-        $start = microtime(true);
+        $start = self::now();
 
         try {
-            $response = Http::timeout(self::PER_ATTEMPT_TIMEOUT_SECONDS)
+            $response = Http::timeout($timeoutSeconds)
                 ->withHeaders(['x-goog-api-key' => $apiKey])
                 ->post(
                     sprintf(self::ENDPOINT, $model),
                     $this->buildRequestPayload($pdfContents),
                 );
         } catch (Throwable $e) {
-            $this->logAttempt('warning', $model, $attemptLabel, $start, 'exception', $e->getMessage());
+            $this->logAttempt('warning', $model, $attemptLabel, $start, 'exception', $remainingBudgetSeconds, $e->getMessage());
 
             // A request that simply never got a response is the same
             // "try again" situation as a fast 503 — confirmed live:
@@ -152,7 +172,7 @@ class ResumeParsingService
 
         if ($response->failed()) {
             $status = $response->status();
-            $this->logAttempt('warning', $model, $attemptLabel, $start, (string) $status);
+            $this->logAttempt('warning', $model, $attemptLabel, $start, (string) $status, $remainingBudgetSeconds);
 
             return match (true) {
                 in_array($status, [429, 503], true) => ResumeParseResult::busy(),
@@ -161,7 +181,7 @@ class ResumeParsingService
             };
         }
 
-        $this->logAttempt('info', $model, $attemptLabel, $start, '200');
+        $this->logAttempt('info', $model, $attemptLabel, $start, '200', $remainingBudgetSeconds);
 
         return $this->extractStructuredData($response->json());
     }
@@ -242,13 +262,14 @@ class ResumeParsingService
         ]);
     }
 
-    private function logAttempt(string $level, string $model, int|string $attemptLabel, float $start, string $status, ?string $exceptionMessage = null): void
+    private function logAttempt(string $level, string $model, int|string $attemptLabel, float $start, string $status, float $remainingBudgetSeconds, ?string $exceptionMessage = null): void
     {
         $context = [
             'model' => $model,
             'attempt' => $attemptLabel,
-            'duration_s' => round(microtime(true) - $start, 2),
+            'duration_s' => round(self::now() - $start, 2),
             'status' => $status,
+            'remaining_budget_s' => round($remainingBudgetSeconds, 2),
         ];
 
         if ($exceptionMessage !== null) {
@@ -277,5 +298,26 @@ class ResumeParsingService
         $text = preg_replace('/[\w.+-]+@[\w-]+\.[\w.-]+/', '[email]', $text);
 
         return preg_replace('/\d/', 'X', $text);
+    }
+
+    /**
+     * Wall-clock seconds, as a float. Goes through Carbon (rather than a
+     * bare microtime(true)) solely so a test can control elapsed time
+     * deterministically with Sleep::fake(syncWithCarbon: true) instead of
+     * actually waiting out real backoffs to exercise the budget logic.
+     */
+    private static function now(): float
+    {
+        return Carbon::now()->getPreciseTimestamp(6) / 1_000_000;
+    }
+
+    /**
+     * An attempt never gets longer than whatever's actually left of the
+     * total budget — confirmed live that a hung attempt can otherwise burn
+     * the whole budget on its own (30s with nothing received).
+     */
+    private static function cappedTimeout(float $attemptTimeout, float $remainingBudget): float
+    {
+        return min($attemptTimeout, $remainingBudget);
     }
 }

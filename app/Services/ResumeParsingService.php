@@ -20,9 +20,14 @@ use Throwable;
  * Confirmed via a live audit that Gemini's newer Flash models genuinely run
  * out of capacity (429/503, or a request that simply times out) a
  * meaningful fraction of the time — not something retrying forever fixes,
- * but something a couple of quick retries plus one attempt on a different
- * model noticeably improves. See ResumeParseOutcome for what a caller can
- * actually tell apart now instead of a bare null.
+ * but something a couple of quick retries plus a couple of attempts on
+ * different models noticeably improves. See ResumeParseOutcome for what a
+ * caller can actually tell apart now instead of a bare null.
+ *
+ * If every model attempt still ends Busy or Unavailable, LocalResumeExtractionService
+ * gets one try at filling the same fields straight from the PDF's own text,
+ * no AI involved — confirmed live that even two Gemini models can both be
+ * overloaded at once, and the upload shouldn't be a dead end when that happens.
  */
 class ResumeParsingService
 {
@@ -52,6 +57,10 @@ class ResumeParsingService
         - resume_text: a clean, well-formatted plain-text summary of the candidate's professional background (experience, roles, achievements) suitable for storing as a free-text resume field. Do not include markdown formatting.
         PROMPT;
 
+    public function __construct(
+        private readonly LocalResumeExtractionService $localExtraction = new LocalResumeExtractionService,
+    ) {}
+
     public function parse(string $pdfContents): ResumeParseResult
     {
         $apiKey = config('services.gemini.api_key');
@@ -59,14 +68,42 @@ class ResumeParsingService
         if (! $apiKey) {
             Log::warning('Gemini API key is not configured; skipping resume parsing.');
 
-            return ResumeParseResult::unavailable();
+            return $this->localExtraction->extractAsFallback($pdfContents, ResumeParseOutcome::Unavailable);
         }
 
-        $primaryModel = config('services.gemini.model');
-        $fallbackModel = config('services.gemini.fallback_model');
         $deadline = microtime(true) + self::TOTAL_TIME_BUDGET_SECONDS;
+        $primaryModel = config('services.gemini.model');
 
-        $result = $this->attempt($primaryModel, $pdfContents, $apiKey, 1);
+        // Order: primary (with its own retries), then each configured
+        // fallback once, same busy handling — stop at the first one that
+        // isn't Busy, or once the shared time budget runs out.
+        $fallbackModels = array_values(array_filter([
+            config('services.gemini.fallback_model'),
+            config('services.gemini.fallback_model_2'),
+        ]));
+
+        $result = $this->attemptWithRetries($primaryModel, $pdfContents, $apiKey, $deadline);
+
+        foreach ($fallbackModels as $fallbackModel) {
+            if ($result->outcome !== ResumeParseOutcome::Busy || microtime(true) >= $deadline) {
+                break;
+            }
+
+            $result = $this->attempt($fallbackModel, $pdfContents, $apiKey, 'fallback');
+        }
+
+        // Only here, once every model is exhausted — never on Unreadable
+        // or Empty, which already have a real, correct answer.
+        if (in_array($result->outcome, [ResumeParseOutcome::Busy, ResumeParseOutcome::Unavailable], true)) {
+            return $this->localExtraction->extractAsFallback($pdfContents, $result->outcome);
+        }
+
+        return $result;
+    }
+
+    private function attemptWithRetries(string $model, string $pdfContents, string $apiKey, float $deadline): ResumeParseResult
+    {
+        $result = $this->attempt($model, $pdfContents, $apiKey, 1);
 
         foreach (self::RETRY_BACKOFF_SECONDS as $i => $backoffSeconds) {
             if ($result->outcome !== ResumeParseOutcome::Busy) {
@@ -83,11 +120,7 @@ class ResumeParsingService
                 return $result;
             }
 
-            $result = $this->attempt($primaryModel, $pdfContents, $apiKey, $i + 2);
-        }
-
-        if ($result->outcome === ResumeParseOutcome::Busy && $fallbackModel && microtime(true) < $deadline) {
-            return $this->attempt($fallbackModel, $pdfContents, $apiKey, 'fallback');
+            $result = $this->attempt($model, $pdfContents, $apiKey, $i + 2);
         }
 
         return $result;

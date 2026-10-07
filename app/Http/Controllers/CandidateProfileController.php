@@ -47,7 +47,10 @@ class CandidateProfileController extends Controller
         $result = $resumeParsingService->parse($request->file('resume')->get());
 
         if ($result->outcome === ResumeParseOutcome::Ok) {
-            return response()->json(['data' => $result->data]);
+            // source: "basic" means LocalResumeExtractionService filled
+            // this without AI, after every Gemini attempt came back busy —
+            // the frontend uses it to show a review-your-fields notice.
+            return response()->json(['data' => $result->data, 'source' => $result->source]);
         }
 
         // Each message below ends by pointing at manual entry explicitly —

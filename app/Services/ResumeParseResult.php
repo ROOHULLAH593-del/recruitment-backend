@@ -14,10 +14,14 @@ final class ResumeParseResult
 {
     /**
      * @param  array{skills: array<int, string>, education_level: ?string, years_experience: int, resume_text: string}|null  $data
+     * @param  'ai'|'basic'  $source  Where an Ok result's fields actually
+     *                                came from — Gemini, or the local non-AI fallback. Irrelevant
+     *                                (left at its default) for every other outcome.
      */
     private function __construct(
         public readonly ResumeParseOutcome $outcome,
         public readonly ?array $data = null,
+        public readonly string $source = 'ai',
     ) {}
 
     /**
@@ -25,7 +29,18 @@ final class ResumeParseResult
      */
     public static function ok(array $data): self
     {
-        return new self(ResumeParseOutcome::Ok, $data);
+        return new self(ResumeParseOutcome::Ok, $data, 'ai');
+    }
+
+    /**
+     * Filled without AI, by LocalResumeExtractionService, after every
+     * Gemini attempt came back Busy or Unavailable.
+     *
+     * @param  array{skills: array<int, string>, education_level: ?string, years_experience: int, resume_text: string}  $data
+     */
+    public static function basic(array $data): self
+    {
+        return new self(ResumeParseOutcome::Ok, $data, 'basic');
     }
 
     public static function busy(): self

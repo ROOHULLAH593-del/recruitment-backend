@@ -29,6 +29,40 @@ In addition, [Laracasts](https://laracasts.com) contains thousands of video tuto
 
 You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
 
+## Local Setup Notes
+
+### Avoiding the single-threaded dev server freeze
+
+`php artisan serve` (and `composer run dev`, which also uses it) runs PHP's
+built-in web server, which handles **one request at a time** by default. A
+slow request anywhere in the app — most notably a resume parse waiting on
+Gemini — blocks every other request for the same duration: logging in,
+checking the dashboard, anything. Confirmed directly: a real resume upload
+in flight made a normally-instant `GET /api/user` take almost as long as the
+upload itself.
+
+`PHP_CLI_SERVER_WORKERS` (see `.env.example`) looks like the fix, but **it
+doesn't work on Windows** — confirmed directly: `php artisan serve
+--no-reload` with it set prints `forking is not supported on this platform`
+and still runs a single worker, because the feature needs the `pcntl`
+extension, which Windows PHP builds don't ship at all. It's only useful on
+Linux/macOS, and only with `--no-reload` even there.
+
+**On Windows, run the app through Laragon's Apache instead** of the CLI
+server when this matters (e.g. while working on anything that calls an
+external API):
+
+1. In Laragon, make sure Apache is the running server (not Nginx) and click
+   **Start All**.
+2. Laragon auto-creates a virtual host for this project at
+   `http://recruitment-backend.test`, document root `public/` — already
+   present if the project lives under Laragon's `www/` folder. Point the
+   frontend's `VITE_API_URL` at it instead of `http://localhost:8000` while
+   doing this.
+
+Apache/PHP-FPM handles each request in its own process, so one slow call
+never blocks another.
+
 ## Agentic Development
 
 Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:

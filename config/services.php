@@ -47,13 +47,23 @@ return [
 
     'gemini' => [
         'api_key' => env('GEMINI_API_KEY'),
-        'model' => env('GEMINI_MODEL', 'gemini-3.6-flash'),
+        // Lightest/fastest model first — confirmed via a live log that
+        // gemini-3.6-flash and gemini-3.8-flash were both overloaded
+        // (503 / silent timeout) while gemini-3.5-flash-lite answered in
+        // 4-6s, so put the model that's actually responding first and the
+        // heavier ones behind it as fallbacks. See ResumeParsingService.
+        'model' => env('GEMINI_MODEL', 'gemini-3.5-flash-lite'),
         // Tried once each, in order, after the primary model's own retries
-        // are still busy (429/503/timeout) — both unset by default, since a
-        // resume parse that never falls back is safer than one silently
-        // signing requests with a model nobody chose. See ResumeParsingService.
-        'fallback_model' => env('GEMINI_FALLBACK_MODEL'),
-        'fallback_model_2' => env('GEMINI_FALLBACK_MODEL_2'),
+        // are still busy (429/503/timeout).
+        'fallback_model' => env('GEMINI_FALLBACK_MODEL', 'gemini-3.6-flash'),
+        'fallback_model_2' => env('GEMINI_FALLBACK_MODEL_2', 'gemini-3.8-flash'),
+        // Per-attempt HTTP timeout and the total budget across the whole
+        // chain (all attempts + backoff waits) — see
+        // ResumeParsingService::parse(). Once the budget is spent the AI
+        // chain stops and the local text fallback runs instead of starting
+        // another attempt that wouldn't finish in time anyway.
+        'attempt_timeout' => (int) env('GEMINI_ATTEMPT_TIMEOUT', 15),
+        'total_budget' => (int) env('GEMINI_TOTAL_BUDGET', 35),
         'embedding_model' => env('GEMINI_EMBEDDING_MODEL', 'gemini-embedding-2'),
     ],
 

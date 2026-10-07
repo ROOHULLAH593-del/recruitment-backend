@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Sleep;
 use Tests\TestCase;
 
 class ResumeUploadTest extends TestCase
@@ -17,7 +18,10 @@ class ResumeUploadTest extends TestCase
     {
         parent::setUp();
 
-        config(['services.gemini.api_key' => 'test-api-key']);
+        config(['services.gemini.api_key' => 'test-api-key', 'services.gemini.fallback_model' => null]);
+        // Real backoffs (2s, 5s) would make the busy-response tests below
+        // slow for no reason.
+        Sleep::fake();
     }
 
     private function fakeSuccessfulGeminiResponse(): void
@@ -67,7 +71,63 @@ class ResumeUploadTest extends TestCase
         $this->assertSame(['Excel'], $profile->fresh()->skills);
     }
 
-    public function test_returns_a_clear_error_when_gemini_fails(): void
+    // --- One distinct response per failure category ---
+
+    public function test_a_persistently_overloaded_gemini_returns_the_busy_category(): void
+    {
+        $candidate = User::factory()->create();
+        CandidateProfile::factory()->create(['user_id' => $candidate->id]);
+        Http::fake(['generativelanguage.googleapis.com/*' => Http::response(['error' => 'overloaded'], 503)]);
+
+        $response = $this->actingAs($candidate, 'sanctum')->postJson('/api/profile/resume-upload', [
+            'resume' => UploadedFile::fake()->create('resume.pdf', 200, 'application/pdf'),
+        ]);
+
+        $response->assertStatus(503)->assertJson([
+            'category' => 'busy',
+            'message' => 'The AI service is busy right now. Please try again in a minute, or fill in your details below.',
+        ]);
+    }
+
+    public function test_a_400_response_returns_the_unreadable_category(): void
+    {
+        $candidate = User::factory()->create();
+        CandidateProfile::factory()->create(['user_id' => $candidate->id]);
+        Http::fake(['generativelanguage.googleapis.com/*' => Http::response(['error' => 'invalid argument'], 400)]);
+
+        $response = $this->actingAs($candidate, 'sanctum')->postJson('/api/profile/resume-upload', [
+            'resume' => UploadedFile::fake()->create('resume.pdf', 200, 'application/pdf'),
+        ]);
+
+        $response->assertStatus(422)->assertJson([
+            'category' => 'unreadable',
+            'message' => "We couldn't read this file. If it is password-protected, remove the password and try again, or fill in your details below.",
+        ]);
+    }
+
+    public function test_a_response_with_nothing_extractable_returns_the_empty_category(): void
+    {
+        $candidate = User::factory()->create();
+        CandidateProfile::factory()->create(['user_id' => $candidate->id]);
+        Http::fake(['generativelanguage.googleapis.com/*' => Http::response([
+            'candidates' => [[
+                'content' => ['parts' => [['text' => json_encode([
+                    'skills' => [], 'years_experience' => 0, 'resume_text' => '',
+                ])]]],
+            ]],
+        ])]);
+
+        $response = $this->actingAs($candidate, 'sanctum')->postJson('/api/profile/resume-upload', [
+            'resume' => UploadedFile::fake()->create('resume.pdf', 200, 'application/pdf'),
+        ]);
+
+        $response->assertStatus(422)->assertJson([
+            'category' => 'empty',
+            'message' => "We couldn't find any details in this file. It may be a scan or an image. Please fill in your details below.",
+        ]);
+    }
+
+    public function test_a_server_error_response_returns_the_unavailable_category(): void
     {
         $candidate = User::factory()->create();
         CandidateProfile::factory()->create(['user_id' => $candidate->id]);
@@ -77,8 +137,28 @@ class ResumeUploadTest extends TestCase
             'resume' => UploadedFile::fake()->create('resume.pdf', 200, 'application/pdf'),
         ]);
 
-        $response->assertStatus(503)->assertJsonStructure(['message']);
+        $response->assertStatus(503)->assertJson([
+            'category' => 'unavailable',
+            'message' => 'Resume auto-fill is unavailable right now. Please fill in your details below.',
+        ]);
     }
+
+    public function test_a_missing_api_key_returns_the_unavailable_category(): void
+    {
+        config(['services.gemini.api_key' => null]);
+        $candidate = User::factory()->create();
+        CandidateProfile::factory()->create(['user_id' => $candidate->id]);
+        Http::fake();
+
+        $response = $this->actingAs($candidate, 'sanctum')->postJson('/api/profile/resume-upload', [
+            'resume' => UploadedFile::fake()->create('resume.pdf', 200, 'application/pdf'),
+        ]);
+
+        $response->assertStatus(503)->assertJsonPath('category', 'unavailable');
+        Http::assertNothingSent();
+    }
+
+    // --- Validation (unaffected by the category work) ---
 
     public function test_rejects_a_non_pdf_file(): void
     {

@@ -48,6 +48,11 @@ return [
     'gemini' => [
         'api_key' => env('GEMINI_API_KEY'),
         'model' => env('GEMINI_MODEL', 'gemini-3.6-flash'),
+        // Tried once, after the primary model's own retries are still busy
+        // (429/503/timeout) — unset by default, since a resume parse that
+        // never falls back is safer than one silently signing requests with
+        // a model nobody chose. See ResumeParsingService.
+        'fallback_model' => env('GEMINI_FALLBACK_MODEL'),
         'embedding_model' => env('GEMINI_EMBEDDING_MODEL', 'gemini-embedding-2'),
     ],
 

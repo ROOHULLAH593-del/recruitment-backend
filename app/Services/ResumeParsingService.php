@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Enums\ResumeParseOutcome;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Sleep;
 use Throwable;
 
 /**
@@ -11,15 +13,36 @@ use Throwable;
  * returns suggested candidate-profile fields for the frontend to pre-fill —
  * this never persists anything itself, and never throws: any failure
  * (missing config, network error, an unexpected or malformed reply) is
- * logged and reported back as null, the same graceful-degradation shape as
- * GoogleCalendarService, so a flaky upstream call degrades to "fill this in
- * yourself" rather than a broken page.
+ * logged and reported back as a ResumeParseResult, the same
+ * graceful-degradation shape as GoogleCalendarService, so a flaky upstream
+ * call degrades to "fill this in yourself" rather than a broken page.
+ *
+ * Confirmed via a live audit that Gemini's newer Flash models genuinely run
+ * out of capacity (429/503, or a request that simply times out) a
+ * meaningful fraction of the time — not something retrying forever fixes,
+ * but something a couple of quick retries plus one attempt on a different
+ * model noticeably improves. See ResumeParseOutcome for what a caller can
+ * actually tell apart now instead of a bare null.
  */
 class ResumeParsingService
 {
     private const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent';
 
-    private const TIMEOUT_SECONDS = 45;
+    // Shorter than the old single 45s call: this is per attempt, and up to
+    // three attempts at the primary model plus one at the fallback can now
+    // happen in a single parse() call, bounded by TOTAL_TIME_BUDGET_SECONDS.
+    private const PER_ATTEMPT_TIMEOUT_SECONDS = 30;
+
+    // Across every attempt and backoff combined. A slow-but-eventually-
+    // responding attempt can still run past this on its own (an in-flight
+    // HTTP call can't be aborted mid-flight), but no *new* attempt or
+    // backoff is started once it's exceeded.
+    private const TOTAL_TIME_BUDGET_SECONDS = 60;
+
+    // Only for a Busy outcome (429/503/timeout) — two retries at the
+    // primary model, waited out before each, then one final attempt at the
+    // fallback model if one is configured and still within budget.
+    private const RETRY_BACKOFF_SECONDS = [2, 5];
 
     private const PROMPT = <<<'PROMPT'
         You are extracting structured data from a candidate's resume for a job application form. Read the attached PDF and respond with the candidate's:
@@ -29,40 +52,83 @@ class ResumeParsingService
         - resume_text: a clean, well-formatted plain-text summary of the candidate's professional background (experience, roles, achievements) suitable for storing as a free-text resume field. Do not include markdown formatting.
         PROMPT;
 
-    /**
-     * @return array{skills: array<int, string>, education_level: ?string, years_experience: int, resume_text: string}|null
-     */
-    public function parse(string $pdfContents): ?array
+    public function parse(string $pdfContents): ResumeParseResult
     {
         $apiKey = config('services.gemini.api_key');
 
         if (! $apiKey) {
             Log::warning('Gemini API key is not configured; skipping resume parsing.');
 
-            return null;
+            return ResumeParseResult::unavailable();
         }
 
+        $primaryModel = config('services.gemini.model');
+        $fallbackModel = config('services.gemini.fallback_model');
+        $deadline = microtime(true) + self::TOTAL_TIME_BUDGET_SECONDS;
+
+        $result = $this->attempt($primaryModel, $pdfContents, $apiKey, 1);
+
+        foreach (self::RETRY_BACKOFF_SECONDS as $i => $backoffSeconds) {
+            if ($result->outcome !== ResumeParseOutcome::Busy) {
+                return $result;
+            }
+
+            if (microtime(true) + $backoffSeconds >= $deadline) {
+                return $result;
+            }
+
+            Sleep::sleep($backoffSeconds);
+
+            if (microtime(true) >= $deadline) {
+                return $result;
+            }
+
+            $result = $this->attempt($primaryModel, $pdfContents, $apiKey, $i + 2);
+        }
+
+        if ($result->outcome === ResumeParseOutcome::Busy && $fallbackModel && microtime(true) < $deadline) {
+            return $this->attempt($fallbackModel, $pdfContents, $apiKey, 'fallback');
+        }
+
+        return $result;
+    }
+
+    private function attempt(string $model, string $pdfContents, string $apiKey, int|string $attemptLabel): ResumeParseResult
+    {
+        $start = microtime(true);
+
         try {
-            $response = Http::timeout(self::TIMEOUT_SECONDS)
+            $response = Http::timeout(self::PER_ATTEMPT_TIMEOUT_SECONDS)
                 ->withHeaders(['x-goog-api-key' => $apiKey])
                 ->post(
-                    sprintf(self::ENDPOINT, config('services.gemini.model')),
+                    sprintf(self::ENDPOINT, $model),
                     $this->buildRequestPayload($pdfContents),
                 );
         } catch (Throwable $e) {
-            Log::error('Gemini resume parsing request failed.', ['exception' => $e->getMessage()]);
+            $this->logAttempt('warning', $model, $attemptLabel, $start, 'exception', $e->getMessage());
 
-            return null;
+            // A request that simply never got a response is the same
+            // "try again" situation as a fast 503 — confirmed live:
+            // Gemini's current overload shows up as both, for the same
+            // underlying reason. Anything else (DNS, connection refused,
+            // TLS) is a real local/network problem retrying won't fix.
+            return str_contains(strtolower($e->getMessage()), 'timed out') || str_contains(strtolower($e->getMessage()), 'timeout')
+                ? ResumeParseResult::busy()
+                : ResumeParseResult::unavailable();
         }
 
         if ($response->failed()) {
-            Log::error('Gemini resume parsing request returned an error response.', [
-                'status' => $response->status(),
-                'body' => $response->body(),
-            ]);
+            $status = $response->status();
+            $this->logAttempt('warning', $model, $attemptLabel, $start, (string) $status);
 
-            return null;
+            return match (true) {
+                in_array($status, [429, 503], true) => ResumeParseResult::busy(),
+                $status === 400 => ResumeParseResult::unreadable(),
+                default => ResumeParseResult::unavailable(),
+            };
         }
+
+        $this->logAttempt('info', $model, $attemptLabel, $start, '200');
 
         return $this->extractStructuredData($response->json());
     }
@@ -100,38 +166,83 @@ class ResumeParsingService
 
     /**
      * @param  array<string, mixed>|null  $body
-     * @return array{skills: array<int, string>, education_level: ?string, years_experience: int, resume_text: string}|null
      */
-    private function extractStructuredData(?array $body): ?array
+    private function extractStructuredData(?array $body): ResumeParseResult
     {
         $text = $body['candidates'][0]['content']['parts'][0]['text'] ?? null;
 
         if (! is_string($text) || $text === '') {
-            Log::error('Gemini resume parsing response did not contain the expected text part.', ['body' => $body]);
+            $this->logMalformedResponse(
+                'Gemini resume parsing response did not contain the expected text part.',
+                json_encode($body) ?: '',
+            );
 
-            return null;
+            return ResumeParseResult::unavailable();
         }
 
         // response_mime_type: application/json should stop Gemini from
         // wrapping this in a markdown fence, but strip one defensively in
         // case a model revision reintroduces it.
-        $text = trim(preg_replace('/^```(?:json)?|```$/m', '', $text));
+        $cleaned = trim(preg_replace('/^```(?:json)?|```$/m', '', $text));
 
-        $data = json_decode($text, true);
+        $data = json_decode($cleaned, true);
 
         if (! is_array($data) || ! isset($data['skills'], $data['years_experience'], $data['resume_text'])) {
-            Log::error('Gemini resume parsing response was not valid structured JSON.', ['text' => $text]);
+            $this->logMalformedResponse('Gemini resume parsing response was not valid structured JSON.', $cleaned);
 
-            return null;
+            return ResumeParseResult::unavailable();
         }
 
         $educationLevel = $data['education_level'] ?? null;
+        $skills = array_values(array_filter(array_map('strval', (array) $data['skills']), fn ($skill) => $skill !== ''));
+        $resumeText = (string) $data['resume_text'];
 
-        return [
-            'skills' => array_values(array_filter(array_map('strval', (array) $data['skills']), fn ($skill) => $skill !== '')),
+        if (trim($resumeText) === '' && $skills === []) {
+            return ResumeParseResult::empty();
+        }
+
+        return ResumeParseResult::ok([
+            'skills' => $skills,
             'education_level' => in_array($educationLevel, ['highschool', 'bachelors', 'masters', 'phd'], true) ? $educationLevel : null,
             'years_experience' => max(0, (int) $data['years_experience']),
-            'resume_text' => (string) $data['resume_text'],
+            'resume_text' => $resumeText,
+        ]);
+    }
+
+    private function logAttempt(string $level, string $model, int|string $attemptLabel, float $start, string $status, ?string $exceptionMessage = null): void
+    {
+        $context = [
+            'model' => $model,
+            'attempt' => $attemptLabel,
+            'duration_s' => round(microtime(true) - $start, 2),
+            'status' => $status,
         ];
+
+        if ($exceptionMessage !== null) {
+            $context['exception'] = $exceptionMessage;
+        }
+
+        Log::log($level, 'Gemini resume parsing attempt.', $context);
+    }
+
+    /**
+     * Logs enough to debug a shape/integration problem without ever
+     * writing a candidate's actual extracted resume content (name, skills,
+     * contact details) to the log file — found to be a real risk in the
+     * previous version, which logged the full raw text/body here.
+     */
+    private function logMalformedResponse(string $message, string $raw): void
+    {
+        Log::error($message, [
+            'length' => strlen($raw),
+            'excerpt' => self::maskSensitive(mb_substr($raw, 0, 120)),
+        ]);
+    }
+
+    private static function maskSensitive(string $text): string
+    {
+        $text = preg_replace('/[\w.+-]+@[\w-]+\.[\w.-]+/', '[email]', $text);
+
+        return preg_replace('/\d/', 'X', $text);
     }
 }

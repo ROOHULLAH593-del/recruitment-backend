@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\CandidateDocumentType;
+use App\Enums\ResumeParseOutcome;
 use App\Http\Requests\CandidateProfile\UpdateCandidateProfileRequest;
 use App\Http\Requests\CandidateProfile\UploadCandidateDocumentRequest;
 use App\Http\Requests\CandidateProfile\UploadResumeRequest;
@@ -43,15 +44,26 @@ class CandidateProfileController extends Controller
      */
     public function uploadResume(UploadResumeRequest $request, ResumeParsingService $resumeParsingService): JsonResponse
     {
-        $suggested = $resumeParsingService->parse($request->file('resume')->get());
+        $result = $resumeParsingService->parse($request->file('resume')->get());
 
-        if ($suggested === null) {
-            return response()->json([
-                'message' => "Couldn't auto-fill from this resume. Please enter your details manually.",
-            ], 503);
+        if ($result->outcome === ResumeParseOutcome::Ok) {
+            return response()->json(['data' => $result->data]);
         }
 
-        return response()->json(['data' => $suggested]);
+        // Each message below ends by pointing at manual entry explicitly —
+        // found during an audit that a generic failure left candidates
+        // unsure whether the form below was even still usable.
+        [$status, $message] = match ($result->outcome) {
+            ResumeParseOutcome::Busy => [503, 'The AI service is busy right now. Please try again in a minute, or fill in your details below.'],
+            ResumeParseOutcome::Unreadable => [422, "We couldn't read this file. If it is password-protected, remove the password and try again, or fill in your details below."],
+            ResumeParseOutcome::Empty => [422, "We couldn't find any details in this file. It may be a scan or an image. Please fill in your details below."],
+            ResumeParseOutcome::Unavailable => [503, 'Resume auto-fill is unavailable right now. Please fill in your details below.'],
+        };
+
+        return response()->json([
+            'category' => $result->outcome->value,
+            'message' => $message,
+        ], $status);
     }
 
     /**
